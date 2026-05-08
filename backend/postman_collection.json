@@ -1,0 +1,262 @@
+{
+  "info": {
+    "name": "SkillConnect AI - Backend API (v2)",
+    "description": "Complete Production-Style API collection for SkillConnect AI Backend. Includes coding, interviews, analytics, and AI reports.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000", "type": "string" },
+    { "key": "token", "value": "YOUR_FIREBASE_TOKEN_HERE", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "🏥 System",
+      "item": [
+        {
+          "name": "Health Status",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/health" }
+        },
+        {
+          "name": "Full Health (Dev Only)",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/health/full" }
+        }
+      ]
+    },
+    {
+      "name": "👤 User Profile",
+      "item": [
+        {
+          "name": "Sync/Create User",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/users/sync",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"name\": \"Test User\", \"profileImage\": \"https://i.pravatar.cc/300\" }"
+            }
+          }
+        },
+        {
+          "name": "Get My Profile",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/users/profile",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "📝 Coding Problems",
+      "item": [
+        {
+          "name": "List All Problems",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/problems?page=1&limit=10" }
+        },
+        {
+          "name": "Filter by Topic",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/problems?topic=Arrays" }
+        },
+        {
+          "name": "Search Problems",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/problems?search=sum" }
+        },
+        {
+          "name": "Get Problem Details",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/problems/1" }
+        }
+      ]
+    },
+    {
+      "name": "🚀 Code Execution",
+      "item": [
+        {
+          "name": "Run Code (Playground)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/submissions/run",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"language\": \"python3\", \"sourceCode\": \"nums = [int(x) for x in input().split()]\\ntarget = int(input())\\nprint(nums, target)\", \"input\": \"2 7 11 15\\n9\" }"
+            }
+          }
+        },
+        {
+          "name": "Submit Code Solution",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/submissions/submit",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"problemId\": 1, \"language\": \"python3\", \"sourceCode\": \"class Solution:\\n    def twoSum(self, nums, target):\\n        prevMap = {}\\n        for i, n in enumerate(nums):\\n            diff = target - n\\n            if diff in prevMap:\\n                return [prevMap[diff], i]\\n            prevMap[n] = i\\n\\nimport sys\\ndef main():\\n    input_data = sys.stdin.read().splitlines()\\n    if not input_data: return\\n    nums = [int(x) for x in input_data[0].split()]\\n    target = int(input_data[1])\\n    sol = Solution()\\n    result = sol.twoSum(nums, target)\\n    print(f'[{result[0]},{result[1]}]')\\n\\nif __name__ == '__main__':\\n    main()\" }"
+            }
+          }
+        },
+        {
+          "name": "My Submission History",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/submissions/mine",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "🎤 AI Interviews",
+      "item": [
+        {
+          "name": "Start Interview Session",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/interviews",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"interviewType\": \"behavioral\", \"difficulty\": \"Easy\" }"
+            }
+          }
+        },
+        {
+          "name": "Get Interview Questions",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/interviews/questions",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"interviewType\": \"behavioral\", \"difficulty\": \"Easy\", \"count\": 5 }"
+            }
+          }
+        },
+        {
+          "name": "Save Real-time Analytics",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/interviews/1/analytics",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"eyeContactScore\": 85, \"postureScore\": 90, \"speechClarity\": 80, \"nervousnessScore\": 20, \"speakingSpeed\": 145, \"emotionDetected\": \"confident\" }"
+            }
+          }
+        },
+        {
+          "name": "End Session & Generate Report",
+          "request": {
+            "method": "PUT",
+            "url": "{{baseUrl}}/api/interviews/1/end",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"duration\": 900, \"score\": 82, \"confidenceScore\": 85, \"communicationScore\": 78, \"technicalScore\": 88, \"transcript\": \"Candidate: I am a software engineer... Interviewer: Tell me about your projects...\" }"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "📊 Advanced Analytics",
+      "item": [
+        {
+          "name": "Dashboard Overview",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/analytics/dashboard",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+          }
+        },
+        {
+          "name": "Detailed Coding Stats",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/analytics/coding",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+          }
+        },
+        {
+          "name": "Interview Performance",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/analytics/interview",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+          }
+        },
+        {
+          "name": "Activity Timeline",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/analytics/activity",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "📄 AI Reports",
+      "item": [
+        {
+          "name": "Generate My Latest Report",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/reports/generate/1",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+          }
+        },
+        {
+          "name": "Get Specific Report",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/reports/1",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "💡 Recommendations",
+      "item": [
+        {
+          "name": "Get My Recommendations",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/api/recommendations",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+          }
+        },
+        {
+          "name": "Force Refresh Recommendations",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/api/recommendations/generate",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }]
+          }
+        }
+      ]
+    }
+  ]
+}

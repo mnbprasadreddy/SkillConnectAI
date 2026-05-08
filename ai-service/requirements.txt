@@ -1,0 +1,26 @@
+# ═══════════════════════════════════════════════════════════════
+# SkillConnect AI — Python AI Service Dependencies
+# ═══════════════════════════════════════════════════════════════
+
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+python-dotenv==1.1.0
+pydantic==2.10.0
+
+# AI/ML
+mediapipe==0.10.18
+opencv-python-headless==4.11.0.86
+deepface==0.0.93
+openai-whisper==20240930
+google-generativeai==0.8.0
+
+# Audio analysis
+numpy==2.2.0
+scipy==1.15.0
+librosa==0.10.2
+
+# HTTP
+httpx==0.28.0
+
+# Image processing
+Pillow==11.1.0

@@ -1,0 +1,206 @@
+// ═══════════════════════════════════════════════════════════════
+// SkillConnect AI — Prisma Schema
+// Complete database schema for the AI Mock Interview &
+// Coding Preparation Platform
+// ═══════════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── USER ───────────────────────────────────────────────────────
+model User {
+  id            Int       @id @default(autoincrement())
+  firebaseUid   String    @unique @map("firebase_uid")
+  name          String
+  email         String    @unique
+  profileImage  String?   @map("profile_image")
+  skillLevel    String    @default("beginner") @map("skill_level")
+  accuracy      Float     @default(0)
+  streak        Int       @default(0)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  submissions         Submission[]
+  interviews          Interview[]
+  contestSubmissions  ContestSubmission[]
+  learningRoadmaps    LearningRoadmap[]
+  recommendations     Recommendation[]
+
+  @@map("users")
+}
+
+// ─── PROBLEM ────────────────────────────────────────────────────
+model Problem {
+  id            Int       @id @default(autoincrement())
+  title         String    @unique
+  description   String
+  difficulty    String
+  topic         String
+  constraints   String?
+  examples      String?
+  starterCode   String?   @map("starter_code")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  testCases     TestCase[]
+  submissions   Submission[]
+
+  @@map("problems")
+}
+
+// ─── TEST CASE ──────────────────────────────────────────────────
+model TestCase {
+  id              Int       @id @default(autoincrement())
+  problemId       Int       @map("problem_id")
+  input           String
+  expectedOutput  String    @map("expected_output")
+  isHidden        Boolean   @default(false) @map("is_hidden")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  problem         Problem   @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@map("test_cases")
+}
+
+// ─── SUBMISSION ─────────────────────────────────────────────────
+model Submission {
+  id          Int       @id @default(autoincrement())
+  userId      Int       @map("user_id")
+  problemId   Int       @map("problem_id")
+  language    String
+  sourceCode  String    @map("source_code")
+  result      String    @default("pending")
+  runtime     String?
+  memory      String?
+  stdout      String?
+  stderr      String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  problem     Problem   @relation(fields: [problemId], references: [id], onDelete: Cascade)
+
+  @@map("submissions")
+}
+
+// ─── INTERVIEW ──────────────────────────────────────────────────
+model Interview {
+  id                  Int       @id @default(autoincrement())
+  userId              Int       @map("user_id")
+  interviewType       String    @map("interview_type")
+  difficulty          String
+  duration            Int       @default(0)
+  score               Float?
+  confidenceScore     Float?    @map("confidence_score")
+  communicationScore  Float?    @map("communication_score")
+  technicalScore      Float?    @map("technical_score")
+  recordingUrl        String?   @map("recording_url")
+  transcript          String?
+  status              String    @default("in_progress")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analytics           InterviewAnalytic?
+  report              Report?
+
+  @@map("interviews")
+}
+
+// ─── INTERVIEW ANALYTICS ────────────────────────────────────────
+model InterviewAnalytic {
+  id                Int       @id @default(autoincrement())
+  interviewId       Int       @unique @map("interview_id")
+  eyeContactScore   Float?    @map("eye_contact_score")
+  postureScore      Float?    @map("posture_score")
+  speechClarity     Float?    @map("speech_clarity")
+  nervousnessScore  Float?    @map("nervousness_score")
+  speakingSpeed     Float?    @map("speaking_speed")
+  emotionDetected   String?   @map("emotion_detected")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  interview         Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  @@map("interview_analytics")
+}
+
+// ─── REPORT ─────────────────────────────────────────────────────
+model Report {
+  id                Int       @id @default(autoincrement())
+  interviewId       Int       @unique @map("interview_id")
+  strengths         String?
+  weaknesses        String?
+  recommendations   String?
+  aiSummary         String?   @map("ai_summary")
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  interview         Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+
+  @@map("reports")
+}
+
+// ─── CONTEST ────────────────────────────────────────────────────
+model Contest {
+  id          Int       @id @default(autoincrement())
+  title       String
+  description String?
+  startTime   DateTime  @map("start_time")
+  endTime     DateTime  @map("end_time")
+  difficulty  String
+  status      String    @default("upcoming")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  submissions ContestSubmission[]
+
+  @@map("contests")
+}
+
+// ─── CONTEST SUBMISSION ─────────────────────────────────────────
+model ContestSubmission {
+  id              Int       @id @default(autoincrement())
+  contestId       Int       @map("contest_id")
+  userId          Int       @map("user_id")
+  score           Float     @default(0)
+  solvedCount     Int       @default(0) @map("solved_count")
+  completionTime  Int?      @map("completion_time")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  contest         Contest   @relation(fields: [contestId], references: [id], onDelete: Cascade)
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([contestId, userId])
+  @@map("contest_submissions")
+}
+
+// ─── LEARNING ROADMAP ───────────────────────────────────────────
+model LearningRoadmap {
+  id                  Int       @id @default(autoincrement())
+  userId              Int       @map("user_id")
+  currentTopic        String?   @map("current_topic")
+  progressPercentage  Float     @default(0) @map("progress_percentage")
+  completedTopics     String?   @map("completed_topics")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("learning_roadmaps")
+}
+
+// ─── RECOMMENDATION ─────────────────────────────────────────────
+model Recommendation {
+  id                  Int       @id @default(autoincrement())
+  userId              Int       @map("user_id")
+  recommendationType  String    @map("recommendation_type")
+  content             String
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("recommendations")
+}
