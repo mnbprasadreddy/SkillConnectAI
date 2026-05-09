@@ -53,10 +53,14 @@ const ProblemCard = ({ problem }) => {
 
       <Link 
         to={`/problems/${problem.id}`}
-        className="w-full flex items-center justify-center gap-2 py-3 bg-white/5 border border-white/10 rounded-xl font-semibold group-hover:bg-primary/10 group-hover:border-primary/50 group-hover:text-primary transition-all"
+        className={`w-full flex items-center justify-center gap-2 py-3 border rounded-xl font-semibold transition-all ${
+          problem.isSolved 
+            ? 'bg-green-500/10 border-green-500/50 text-green-400 hover:bg-green-500/20' 
+            : 'bg-white/5 border-white/10 group-hover:bg-primary/10 group-hover:border-primary/50 group-hover:text-primary'
+        }`}
       >
-        Solve Challenge
-        <ArrowUpRight className="w-4 h-4" />
+        {problem.isSolved ? 'Solved' : 'Solve Challenge'}
+        {!problem.isSolved && <ArrowUpRight className="w-4 h-4" />}
       </Link>
     </motion.div>
   );

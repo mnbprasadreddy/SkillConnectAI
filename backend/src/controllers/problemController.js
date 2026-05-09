@@ -14,13 +14,21 @@ const createProblem = asyncHandler(async (req, res) => {
 const getAllProblems = asyncHandler(async (req, res) => {
   const { page, limit, offset } = parsePagination(req.query);
   const { difficulty, topic, search } = req.query;
-  const { problems, totalCount } = await problemService.getAllProblems({ page, limit, offset, difficulty, topic, search });
+  const userId = req.user?.id;
+  
+  console.log(`[Controller] getAllProblems called with params:`, { page, limit, difficulty, topic, search });
+  
+  const { problems, totalCount } = await problemService.getAllProblems({ page, limit, offset, difficulty, topic, search, userId });
   const topics = await problemService.getDistinctTopics();
+  
+  console.log(`[Controller] problems array length:`, problems?.length);
+  
   return response.paginated(res, { data: problems, page, limit, totalCount, extras: { topics } });
 });
 
 const getProblemById = asyncHandler(async (req, res) => {
-  const problem = await problemService.getProblemById(parseInt(req.params.id));
+  const userId = req.user?.id;
+  const problem = await problemService.getProblemById(parseInt(req.params.id), userId);
   if (!problem) return response.notFound(res, 'Problem');
   return response.success(res, problem);
 });

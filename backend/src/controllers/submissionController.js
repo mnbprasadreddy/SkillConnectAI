@@ -7,9 +7,16 @@ const { asyncHandler, parsePagination } = require('../utils/helpers');
 const response = require('../utils/apiResponse');
 
 const runCode = asyncHandler(async (req, res) => {
+  console.log('[RUN_CODE] Request body:', req.body);
   const { language, sourceCode, input } = req.body;
-  const result = await submissionService.runCode(language, sourceCode, input);
-  return response.success(res, result);
+  try {
+    const result = await submissionService.runCode(language, sourceCode, input);
+    console.log('[RUN_CODE] Result:', result);
+    return response.success(res, result);
+  } catch (error) {
+    console.error('[RUN_CODE] Service error:', error);
+    throw error;
+  }
 });
 
 const submitCode = asyncHandler(async (req, res) => {

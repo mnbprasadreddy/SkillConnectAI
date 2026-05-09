@@ -46,9 +46,38 @@ const submitCode = async (language, sourceCode, stdin = '', expectedOutput = nul
     );
     return response.data;
   } catch (error) {
-    const msg = error.response?.data?.message || error.response?.data?.error || error.message;
-    logger.error('Judge0 submit error:', msg);
-    throw Object.assign(new Error(`Judge0 submission failed: ${msg}`), { statusCode: 502 });
+    if (error.response) {
+      const status = error.response.status;
+      let errorType = 'UNKNOWN_ERROR';
+      let message = error.response.data?.message || error.response.data?.error || 'Unknown Judge0 Error';
+      
+      if (status === 401) {
+        errorType = 'UNAUTHORIZED';
+        message = 'Judge0 API authentication failed. Check API key.';
+      } else if (status === 403) {
+        errorType = 'SUBSCRIPTION_ERROR';
+        message = 'Judge0 API subscription inactive';
+      } else if (status === 429) {
+        errorType = 'RATE_LIMIT_EXCEEDED';
+        message = 'Judge0 API rate limit exceeded. Please try again later.';
+      }
+      
+      logger.error(`Judge0 submit error [${status}]:`, message);
+      throw Object.assign(new Error(message), {
+        statusCode: status,
+        isJudge0Error: true,
+        errorType,
+        source: 'judge0'
+      });
+    } else {
+      logger.error('Judge0 network/timeout error:', error.message);
+      throw Object.assign(new Error('Judge0 network/timeout error'), {
+        statusCode: 504,
+        isJudge0Error: true,
+        errorType: 'NETWORK_ERROR',
+        source: 'judge0'
+      });
+    }
   }
 };
 
@@ -147,50 +176,82 @@ async function batchSubmitParallel(languageId, sourceCode, testCases, limits) {
     memory_limit: limits.memory_limit,
   }));
 
-  const response = await axios.post(
-    `${judge0Config.baseUrl}/submissions/batch?base64_encoded=true`,
-    { submissions },
-    { headers: judge0Config.getHeaders(), timeout: 15000 }
-  );
+  try {
+    const response = await axios.post(
+      `${judge0Config.baseUrl}/submissions/batch?base64_encoded=true`,
+      { submissions },
+      { headers: judge0Config.getHeaders(), timeout: 15000 }
+    );
 
-  const tokens = response.data.map((s) => s.token);
+    const tokens = response.data.map((s) => s.token);
 
-  // Poll all tokens
-  await sleep(2000); // Initial wait
+    // Poll all tokens
+    await sleep(2000); // Initial wait
 
-  const results = [];
-  for (let i = 0; i < tokens.length; i++) {
-    try {
-      const result = await getResult(tokens[i]);
-      const actualOutput = (result.stdout || '').trim();
-      const expectedOutput = (testCases[i].expectedOutput || '').trim();
-      const passed = actualOutput === expectedOutput && result.result === 'accepted';
+    const results = [];
+    for (let i = 0; i < tokens.length; i++) {
+      try {
+        const result = await getResult(tokens[i]);
+        const actualOutput = (result.stdout || '').trim();
+        const expectedOutput = (testCases[i].expectedOutput || '').trim();
+        const passed = actualOutput === expectedOutput && result.result === 'accepted';
 
-      results.push({
-        testCaseId: testCases[i].id,
-        passed: result.statusId === 3 ? actualOutput === expectedOutput : false,
-        isHidden: testCases[i].isHidden || false,
-        actualOutput,
-        expectedOutput,
-        runtime: result.runtime,
-        runtimeMs: result.runtimeMs,
-        memory: result.memory,
-        memoryKb: result.memoryKb,
-        result: passed ? 'accepted' : result.result,
-        error: result.stderr || result.compileOutput || result.message || null,
-      });
-    } catch (error) {
-      results.push({
-        testCaseId: testCases[i].id,
-        passed: false,
-        isHidden: testCases[i].isHidden || false,
-        error: error.message,
-        result: 'runtime_error',
+        results.push({
+          testCaseId: testCases[i].id,
+          passed: result.statusId === 3 ? actualOutput === expectedOutput : false,
+          isHidden: testCases[i].isHidden || false,
+          actualOutput,
+          expectedOutput,
+          runtime: result.runtime,
+          runtimeMs: result.runtimeMs,
+          memory: result.memory,
+          memoryKb: result.memoryKb,
+          result: passed ? 'accepted' : result.result,
+          error: result.stderr || result.compileOutput || result.message || null,
+        });
+      } catch (error) {
+        results.push({
+          testCaseId: testCases[i].id,
+          passed: false,
+          isHidden: testCases[i].isHidden || false,
+          error: error.message,
+          result: 'runtime_error',
+        });
+      }
+    }
+
+    return results;
+  } catch (error) {
+    if (error.response) {
+      const status = error.response.status;
+      let errorType = 'UNKNOWN_ERROR';
+      let message = error.response.data?.message || error.response.data?.error || 'Unknown Judge0 Batch Error';
+      
+      if (status === 401) {
+        errorType = 'UNAUTHORIZED';
+        message = 'Judge0 API authentication failed.';
+      } else if (status === 403) {
+        errorType = 'SUBSCRIPTION_ERROR';
+        message = 'Judge0 API subscription inactive';
+      } else if (status === 429) {
+        errorType = 'RATE_LIMIT_EXCEEDED';
+        message = 'Judge0 API rate limit exceeded.';
+      }
+      
+      throw Object.assign(new Error(message), {
+        statusCode: status,
+        isJudge0Error: true,
+        errorType,
+        source: 'judge0'
       });
     }
+    throw Object.assign(new Error('Judge0 batch network error'), {
+      statusCode: 504,
+      isJudge0Error: true,
+      errorType: 'NETWORK_ERROR',
+      source: 'judge0'
+    });
   }
-
-  return results;
 }
 
 /**
@@ -234,6 +295,30 @@ async function batchSubmitSequential(language, sourceCode, testCases, limits) {
 }
 
 /**
+ * Validate Judge0 connectivity and subscription on startup
+ */
+const validateConnection = async () => {
+  try {
+    const response = await axios.get(
+      `${judge0Config.baseUrl}/about`,
+      { headers: judge0Config.getHeaders(), timeout: 5000 }
+    );
+    // If we get here, the API key works for RapidAPI Judge0
+    logger.info('[Judge0] Connected Successfully');
+    return true;
+  } catch (error) {
+    if (error.response && error.response.status === 403) {
+      logger.warn('[Judge0] Subscription Invalid: RapidAPI subscription is inactive or missing.');
+    } else if (error.response && error.response.status === 401) {
+      logger.warn('[Judge0] Unauthorized: Invalid API key.');
+    } else {
+      logger.warn(`[Judge0] Connection Failed: ${error.message}`);
+    }
+    return false;
+  }
+};
+
+/**
  * Get available languages from Judge0
  */
 const getLanguages = async () => {
@@ -272,5 +357,6 @@ module.exports = {
   batchEvaluate,
   getLanguages,
   getSystemInfo,
+  validateConnection,
   EXECUTION_LIMITS,
 };

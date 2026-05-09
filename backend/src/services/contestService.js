@@ -77,6 +77,12 @@ const getContestById = async (id) => {
   return await prisma.contest.findUnique({
     where: { id },
     include: {
+      problems: {
+        include: {
+          problem: { select: { id: true, title: true, difficulty: true, topic: true } }
+        },
+        orderBy: { points: 'asc' }
+      },
       submissions: {
         include: {
           user: { select: { id: true, name: true, profileImage: true } },

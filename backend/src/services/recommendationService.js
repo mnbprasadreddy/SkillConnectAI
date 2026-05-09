@@ -35,32 +35,7 @@ const generateRecommendations = async (userId) => {
   const recommendations = [];
 
   // ── 1. Topic Analysis & Weak Topic Detection ─────────────
-  const topicStats = {};
-  const recentFailedTopics = new Set();
-
-  for (const sub of submissions) {
-    const t = sub.problem.topic;
-    if (!topicStats[t]) topicStats[t] = { total: 0, accepted: 0, problems: new Set(), recentFails: 0 };
-    topicStats[t].total++;
-    topicStats[t].problems.add(sub.problem.id);
-    if (sub.result === 'accepted') {
-      topicStats[t].accepted++;
-    } else {
-      // Track recent failures (last 10 submissions per topic)
-      topicStats[t].recentFails++;
-    }
-  }
-
-  // Find weak topics (< 50% accuracy with minimum 2 attempts)
-  const weakTopics = Object.entries(topicStats)
-    .filter(([_, s]) => s.total >= 2 && (s.accepted / s.total) < 0.5)
-    .sort((a, b) => (a[1].accepted / a[1].total) - (b[1].accepted / b[1].total))
-    .map(([topic, stats]) => ({
-      topic,
-      accuracy: calcPercentage(stats.accepted, stats.total),
-      attempts: stats.total,
-    }));
-
+  const { weakTopics, topicStats } = await getWeakTopics(userId, submissions);
   // Find untried topics
   const allTopics = await prisma.problem.findMany({
     select: { topic: true },
@@ -306,4 +281,39 @@ const getRecommendations = async (userId) => {
   });
 };
 
-module.exports = { generateRecommendations, getRecommendations };
+/**
+ * Get weak topics specifically for the AI Interview adaptation
+ */
+const getWeakTopics = async (userId, preloadedSubmissions = null) => {
+  const submissions = preloadedSubmissions || await prisma.submission.findMany({
+    where: { userId },
+    include: { problem: { select: { id: true, topic: true } } },
+  });
+
+  const topicStats = {};
+
+  for (const sub of submissions) {
+    const t = sub.problem.topic;
+    if (!topicStats[t]) topicStats[t] = { total: 0, accepted: 0, problems: new Set(), recentFails: 0 };
+    topicStats[t].total++;
+    topicStats[t].problems.add(sub.problem.id);
+    if (sub.result === 'accepted') {
+      topicStats[t].accepted++;
+    } else {
+      topicStats[t].recentFails++;
+    }
+  }
+
+  const weakTopics = Object.entries(topicStats)
+    .filter(([_, s]) => s.total >= 2 && (s.accepted / s.total) < 0.5)
+    .sort((a, b) => (a[1].accepted / a[1].total) - (b[1].accepted / b[1].total))
+    .map(([topic, stats]) => ({
+      topic,
+      accuracy: calcPercentage(stats.accepted, stats.total),
+      attempts: stats.total,
+    }));
+
+  return { weakTopics, topicStats };
+};
+
+module.exports = { generateRecommendations, getRecommendations, getWeakTopics };

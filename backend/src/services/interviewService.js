@@ -149,13 +149,26 @@ const saveAnalytics = async (interviewId, analyticsData) => {
 /**
  * Generate interview questions using AI service or fallback
  */
-const generateQuestions = async (interviewType, difficulty, count = 5) => {
+const generateQuestions = async (userId, interviewType, difficulty, count = 5) => {
   try {
+    const recommendationService = require('./recommendationService');
+    let focusTopics = [];
+    
+    if (interviewType === 'technical' || interviewType === 'coding') {
+      try {
+        const { weakTopics } = await recommendationService.getWeakTopics(userId);
+        focusTopics = weakTopics.map(wt => wt.topic);
+      } catch (err) {
+        logger.warn('Failed to fetch weak topics for interview generation:', err.message);
+      }
+    }
+
     const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
     const response = await axios.post(`${aiServiceUrl}/api/ai/interview/questions`, {
       interview_type: interviewType,
       difficulty,
       count,
+      focus_topics: focusTopics
     }, { timeout: 10000 });
 
     if (response.data && response.data.questions) {
@@ -168,6 +181,7 @@ const generateQuestions = async (interviewType, difficulty, count = 5) => {
     return {
       questions: getDefaultQuestions(interviewType, count),
       source: 'fallback',
+      adaptation: 'AI adaptation failed, using standard fallback questions.'
     };
   }
 };

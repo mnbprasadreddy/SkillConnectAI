@@ -1,3 +1,62 @@
+# SkillConnect AI: Complete Rebuild Blueprint
+
+This guide contains the exact steps, dependencies, schemas, and configurations required to recreate the SkillConnect AI project completely from scratch in a new directory.
+
+## 1. Project Initialization & Folder Structure
+
+Create a new main directory and split it into `frontend` and `backend`.
+
+```bash
+mkdir skillconnect-ai
+cd skillconnect-ai
+mkdir backend
+```
+
+## 2. Backend Setup (Node.js + Express + Prisma)
+
+### Initialize Backend
+```bash
+cd backend
+npm init -y
+```
+
+### Install Dependencies
+**Core Packages:**
+```bash
+npm install express cors dotenv helmet morgan compression axios winston
+npm install firebase-admin socket.io express-rate-limit express-validator
+```
+
+**Database (Prisma):**
+```bash
+npm install @prisma/client
+npm install -D prisma nodemon prisma-dbml-generator
+```
+
+### Backend `.env` File
+Create a `.env` file in the root of the `backend` folder:
+```env
+PORT=5000
+NODE_ENV=development
+
+# Neon PostgreSQL Connection String
+DATABASE_URL="postgresql://<user>:<password>@<host>/<database>?sslmode=require"
+
+# Firebase Admin Service Account JSON (Minified string)
+FIREBASE_SERVICE_ACCOUNT='{ "type": "service_account", "project_id": "...", "private_key_id": "...", "private_key": "...", "client_email": "...", "client_id": "...", "auth_uri": "...", "token_uri": "...", "auth_provider_x509_cert_url": "...", "client_x509_cert_url": "..." }'
+
+# Judge0 API Keys (For Code Execution)
+RAPIDAPI_KEY="your_rapidapi_key_here"
+JUDGE0_HOST="judge0-ce.p.rapidapi.com"
+
+# External AI / Recommendation API keys
+OPENAI_API_KEY="your_openai_key"
+```
+
+### Prisma Schema (`backend/prisma/schema.prisma`)
+Run `npx prisma init` to create the prisma folder, then overwrite `schema.prisma` with the following:
+
+```prisma
 generator client {
   provider = "prisma-client-js"
 }
@@ -140,7 +199,6 @@ model Contest {
   @@map("contests")
 }
 
-// ─── CONTEST PROBLEM ────────────────────────────────────────────
 model ContestProblem {
   id        Int      @id @default(autoincrement())
   contestId Int      @map("contest_id")
@@ -193,3 +251,141 @@ model Recommendation {
 
   @@map("recommendations")
 }
+```
+
+Once pasted, run:
+```bash
+npx prisma generate
+npx prisma db push
+```
+
+---
+
+## 3. Frontend Setup (React + Vite)
+
+### Initialize Frontend
+Return to the root directory (`skillconnect-ai`) and generate a Vite app:
+```bash
+cd ..
+npm create vite@latest frontend -- --template react
+cd frontend
+npm install
+```
+
+### Install Dependencies
+**Core Packages:**
+```bash
+npm install react-router-dom axios date-fns clsx tailwind-merge framer-motion lucide-react recharts
+npm install firebase @monaco-editor/react socket.io-client
+```
+
+**Tailwind CSS Setup:**
+```bash
+npm install -D tailwindcss postcss autoprefixer
+npx tailwindcss init -p
+```
+
+### Tailwind Configuration (`frontend/tailwind.config.js`)
+```javascript
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        background: '#0a0a0f',
+        surface: '#111116',
+        primary: '#00f0ff',
+        secondary: '#7000ff',
+        accent: '#ff0055',
+        muted: '#8892b0',
+      },
+      boxShadow: {
+        'neon-cyan': '0 0 10px rgba(0, 240, 255, 0.5), 0 0 20px rgba(0, 240, 255, 0.3)',
+        'neon-purple': '0 0 10px rgba(112, 0, 255, 0.5), 0 0 20px rgba(112, 0, 255, 0.3)',
+      },
+      backgroundImage: {
+        'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
+        'glass-gradient': 'linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 100%)',
+      }
+    },
+  },
+  plugins: [],
+}
+```
+
+### Frontend `.env` File
+Create `.env` in the root of the `frontend` folder:
+```env
+VITE_API_URL=http://localhost:5000/api
+
+# Firebase Config
+VITE_FIREBASE_API_KEY="your_firebase_api_key"
+VITE_FIREBASE_AUTH_DOMAIN="your_firebase_auth_domain"
+VITE_FIREBASE_PROJECT_ID="your_firebase_project_id"
+VITE_FIREBASE_STORAGE_BUCKET="your_firebase_storage_bucket"
+VITE_FIREBASE_MESSAGING_SENDER_ID="your_firebase_sender_id"
+VITE_FIREBASE_APP_ID="your_firebase_app_id"
+```
+
+### Critical Setup: `api.js` Interceptor
+To prevent the exact hydration issues we previously fixed, place this in `frontend/src/services/api.js`:
+
+```javascript
+import axios from 'axios';
+
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const defaultApiUrl = isLocalhost ? 'http://localhost:5000/api' : `${window.location.origin}/api`;
+
+const api = axios.create({
+  baseURL: import.meta.env.VITE_API_URL || defaultApiUrl,
+  headers: { 'Content-Type': 'application/json' },
+});
+
+api.interceptors.request.use(
+  async (config) => {
+    const token = localStorage.getItem('skillconnect_token');
+    if (token) config.headers.Authorization = `Bearer ${token}`;
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+api.interceptors.response.use(
+  (response) => {
+    const payload = response.data;
+    if (payload && typeof payload === 'object' && 'success' in payload) {
+      if (!('data' in payload)) payload.data = null;
+      return payload;
+    }
+    return { success: true, data: payload };
+  },
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('skillconnect_token');
+    }
+    return Promise.reject(error);
+  }
+);
+
+export default api;
+```
+
+## 4. Run Both Environments
+
+**Terminal 1 (Backend):**
+```bash
+cd backend
+npm run dev
+```
+
+**Terminal 2 (Frontend):**
+```bash
+cd frontend
+npm run dev
+```
+
+This completes the absolute pin-to-pin core architecture replication guide!

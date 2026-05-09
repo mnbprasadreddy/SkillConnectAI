@@ -20,6 +20,7 @@ const Recommendations = lazy(() => import('./pages/Recommendations'));
 const Roadmap = lazy(() => import('./pages/Roadmap'));
 const LearningMaterials = lazy(() => import('./pages/LearningMaterials'));
 const Contests = lazy(() => import('./pages/Contests'));
+const ContestArena = lazy(() => import('./pages/ContestArena'));
 const ReplayCenter = lazy(() => import('./pages/ReplayCenter'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -88,6 +89,7 @@ function App() {
               <Route path="interviews" element={<Interviews />} />
               <Route path="interviews/report/:id" element={<Report />} />
               <Route path="contests" element={<Contests />} />
+              <Route path="contests/:id" element={<ContestArena />} />
               <Route path="recommendations" element={<Recommendations />} />
               <Route path="roadmap" element={<Roadmap />} />
               <Route path="learning" element={<LearningMaterials />} />

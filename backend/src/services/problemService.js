@@ -25,7 +25,7 @@ const createProblem = async (data) => {
 /**
  * Get all problems with pagination, search, and filters
  */
-const getAllProblems = async ({ page, limit, offset, difficulty, topic, search }) => {
+const getAllProblems = async ({ page, limit, offset, difficulty, topic, search, userId }) => {
   const where = {};
 
   if (difficulty) where.difficulty = difficulty;
@@ -60,14 +60,40 @@ const getAllProblems = async ({ page, limit, offset, difficulty, topic, search }
     prisma.problem.count({ where }),
   ]);
 
-  return { problems, totalCount };
+  console.log(`[Service] Raw DB problems length:`, problems.length, `Total Count:`, totalCount);
+
+  // If user is authenticated, check which problems they've solved
+  let solvedIds = new Set();
+  if (userId) {
+    try {
+      console.log(`[Service] Fetching solved problems for userId: ${userId}`);
+      const solved = await prisma.submission.findMany({
+        where: { userId, result: 'accepted' },
+        select: { problemId: true },
+        distinct: ['problemId'],
+      });
+      solvedIds = new Set(solved.map(s => s.problemId));
+      console.log(`[Service] Solved problems count:`, solvedIds.size);
+    } catch (e) {
+      console.error(`[Service] Error fetching solved problems:`, e.message);
+    }
+  }
+
+  const enhancedProblems = problems.map(p => ({
+    ...p,
+    isSolved: solvedIds.has(p.id),
+  }));
+
+  console.log(`[Service] Returning ${enhancedProblems.length} enhanced problems.`);
+
+  return { problems: enhancedProblems, totalCount };
 };
 
 /**
  * Get a single problem by ID with public test cases
  */
-const getProblemById = async (id) => {
-  return await prisma.problem.findUnique({
+const getProblemById = async (id, userId) => {
+  const problem = await prisma.problem.findUnique({
     where: { id },
     include: {
       testCases: {
@@ -80,6 +106,40 @@ const getProblemById = async (id) => {
       },
     },
   });
+
+  let isSolved = false;
+  let savedCodes = {};
+
+  if (userId && problem) {
+    const submissions = await prisma.submission.findMany({
+      where: { userId, problemId: id, result: 'accepted' },
+      orderBy: { createdAt: 'desc' },
+      distinct: ['language'],
+      select: { 
+        language: true, 
+        sourceCode: true,
+        runtime: true,
+        memory: true,
+        createdAt: true
+      }
+    });
+
+    if (submissions.length > 0) {
+      isSolved = true;
+      submissions.forEach(sub => {
+        if (!savedCodes[sub.language]) {
+          savedCodes[sub.language] = {
+            sourceCode: sub.sourceCode,
+            runtime: sub.runtime,
+            memory: sub.memory,
+            submittedAt: sub.createdAt
+          };
+        }
+      });
+    }
+  }
+
+  return problem ? { ...problem, isSolved, savedCodes } : null;
 };
 
 /**

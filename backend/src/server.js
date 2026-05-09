@@ -19,8 +19,10 @@ const server = http.createServer(app);
 initializeSocket(server);
 setupSocketHandlers();
 
+const judge0Service = require('./services/judge0Service');
+
 // Start server
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   logger.info(`═══════════════════════════════════════════════════`);
   logger.info(`  SkillConnect AI Backend`);
   logger.info(`  Port: ${PORT}`);
@@ -28,6 +30,9 @@ server.listen(PORT, () => {
   logger.info(`  API: http://localhost:${PORT}`);
   logger.info(`  Health: http://localhost:${PORT}/api/health`);
   logger.info(`═══════════════════════════════════════════════════`);
+  
+  // Validate Judge0 connection on startup
+  await judge0Service.validateConnection();
 });
 
 // Graceful shutdown

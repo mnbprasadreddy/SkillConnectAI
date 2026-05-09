@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, memo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import Editor from '@monaco-editor/react';
 import { 
   Play, 
@@ -19,6 +19,7 @@ import {
   Zap
 } from 'lucide-react';
 import api from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const CodeEditor = memo(({ language, code, setCode }) => (
@@ -48,6 +49,10 @@ const CodeEditor = memo(({ language, code, setCode }) => (
 const Workspace = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  const contestId = searchParams.get('contestId');
+  const { refreshUser } = useAuth();
   
   const [problem, setProblem] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -57,6 +62,8 @@ const Workspace = () => {
   const [results, setResults] = useState(null);
   const [executing, setExecuting] = useState(false);
   const [hints, setHints] = useState([]);
+  const [activeTestCaseTab, setActiveTestCaseTab] = useState(0);
+  const [userStats, setUserStats] = useState({ attempts: 0, accepted: 0 });
 
   const languages = [
     { id: 'python3', label: 'Python 3', default: 'def solve():\n    # Your logic here\n    pass' },
@@ -76,13 +83,36 @@ const Workspace = () => {
         const response = await api.get(`/problems/${id}`);
         const data = response.data;
         setProblem(data);
-        setCode(languages.find(l => l.id === language)?.default || '');
+        
+        let initialCode = '';
+        if (data.savedCodes && data.savedCodes[language]) {
+          initialCode = data.savedCodes[language].sourceCode;
+        } else if (data.starterCode) {
+          try {
+            const parsed = JSON.parse(data.starterCode);
+            initialCode = parsed[language] || '';
+          } catch(e) {}
+        }
+        setCode(initialCode || languages.find(l => l.id === language)?.default || '');
         
         if (data.topic) {
           setHints([
             { id: 1, title: 'Complexity Target', content: `Optimal solution for ${data.topic} usually targets O(N) or O(log N).` },
             { id: 2, title: 'Edge Cases', content: 'Consider empty inputs, negative values, and maximum constraints.' }
           ]);
+        }
+        
+        try {
+          const subsRes = await api.get(`/submissions/problem/${id}`);
+          const subs = subsRes.data.data || subsRes.data;
+          if (Array.isArray(subs)) {
+            setUserStats({
+              attempts: subs.length,
+              accepted: subs.filter(s => s.result === 'accepted').length
+            });
+          }
+        } catch(e) {
+          console.error("Failed to fetch user stats for problem");
         }
       } catch (err) {
         console.error('Failed to fetch problem', err);
@@ -93,6 +123,22 @@ const Workspace = () => {
     };
     fetchProblem();
   }, [id]);
+
+  const handleLanguageChange = (e) => {
+    const newLang = e.target.value;
+    setLanguage(newLang);
+    
+    let newCode = '';
+    if (problem?.savedCodes && problem.savedCodes[newLang]) {
+      newCode = problem.savedCodes[newLang].sourceCode;
+    } else if (problem?.starterCode) {
+      try {
+        const parsed = JSON.parse(problem.starterCode);
+        newCode = parsed[newLang] || '';
+      } catch(e) {}
+    }
+    setCode(newCode || languages.find(l => l.id === newLang)?.default || '');
+  };
 
   const handleRun = async () => {
     try {
@@ -107,6 +153,13 @@ const Workspace = () => {
       setActiveTab('console');
     } catch (err) {
       console.error('Execution failed', err);
+      setResults({
+        type: 'run',
+        statusId: 13,
+        status: 'Execution Failed',
+        stderr: err.response?.data?.error || err.message || 'Judge0 execution pipeline failure.',
+      });
+      setActiveTab('console');
     } finally {
       setExecuting(false);
     }
@@ -121,10 +174,64 @@ const Workspace = () => {
         language,
         sourceCode: code
       });
-      setResults({ type: 'submit', ...response.data });
+      
+      const payloadData = response.data || response;
+      setResults({ type: 'submit', ...payloadData });
+      
+      // Synchronize frontend state immediately
+      if (payloadData?.submission) {
+        const isAccepted = payloadData.submission.result === 'accepted';
+        
+        setUserStats(prev => ({
+          attempts: prev.attempts + 1,
+          accepted: prev.accepted + (isAccepted ? 1 : 0)
+        }));
+        
+        if (isAccepted) {
+          setProblem(prev => ({ 
+            ...prev, 
+            isSolved: true,
+            savedCodes: {
+              ...(prev?.savedCodes || {}),
+              [language]: {
+                sourceCode: code,
+                runtime: payloadData.submission.runtime,
+                memory: payloadData.submission.memory,
+                submittedAt: payloadData.submission.createdAt
+              }
+            }
+          }));
+          
+          if (contestId) {
+            try {
+              // Minimal Contest Wiring: Increment score upon accepted submission
+              await api.post(`/contests/${contestId}/submit`, {
+                score: 100, // Simplistic score increment for now
+                solvedCount: 1
+              });
+            } catch (e) {
+              console.error('Contest score sync failed', e);
+            }
+          }
+          
+          if (refreshUser) refreshUser(); // Refresh global user stats for dashboard
+        }
+      }
+      
       setActiveTab('console');
     } catch (err) {
       console.error('Submission failed', err);
+      setResults({
+        type: 'submit',
+        statusId: 13,
+        status: 'Submission Failed',
+        summary: {
+          overallResult: 'Error',
+          verdictMessage: err.response?.data?.error || err.message || 'Judge0 submission pipeline failure.',
+        },
+        stderr: err.response?.data?.error || err.message,
+      });
+      setActiveTab('console');
     } finally {
       setExecuting(false);
     }
@@ -145,20 +252,33 @@ const Workspace = () => {
             <ChevronLeft className="w-5 h-5 text-muted group-hover:text-white transition-colors" />
           </button>
           <div className="h-4 w-px bg-white/10" />
-          <h2 className="font-bold tracking-tight text-sm md:text-base">{problem?.title}</h2>
+          <h2 className="font-bold tracking-tight text-sm md:text-base flex items-center gap-2">
+            {problem?.title}
+            {problem?.isSolved && <CheckCircle2 className="w-4 h-4 text-green-400" />}
+          </h2>
           <span className={`text-[10px] uppercase tracking-widest font-black px-2.5 py-0.5 rounded-lg border ${
-            problem?.difficulty === 'Easy' ? 'border-green-500/30 text-green-400 bg-green-500/5' :
-            problem?.difficulty === 'Medium' ? 'border-amber-500/30 text-amber-400 bg-amber-500/5' :
-            'border-red-500/30 text-red-400 bg-red-500/5'
+            problem?.difficulty === 'Easy' ? 'border-green-500/50 text-green-400 bg-green-500/10 shadow-[0_0_10px_rgba(34,197,94,0.2)]' :
+            problem?.difficulty === 'Medium' ? 'border-amber-500/50 text-amber-400 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.2)]' :
+            'border-red-500/50 text-red-400 bg-red-500/10 shadow-[0_0_10px_rgba(239,68,68,0.2)]'
           }`}>
             {problem?.difficulty}
           </span>
+          {problem?.topic && (
+            <span className="text-[10px] uppercase tracking-widest font-black px-2.5 py-0.5 rounded-lg border border-primary/30 text-primary bg-primary/5 backdrop-blur-md">
+              {problem.topic}
+            </span>
+          )}
+          {userStats.attempts > 0 && (
+            <span className="text-[10px] text-muted ml-4 font-bold tracking-widest hidden md:inline-block">
+              ATTEMPTS: {userStats.attempts} <span className="mx-2">|</span> ACCEPTED: {userStats.accepted} <span className="mx-2">|</span> RATE: {Math.round((userStats.accepted / userStats.attempts) * 100)}%
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-4">
           <select 
             value={language}
-            onChange={(e) => setLanguage(e.target.value)}
+            onChange={handleLanguageChange}
             className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase outline-none focus:border-primary/50 transition-all cursor-pointer"
           >
             {languages.map(l => <option key={l.id} value={l.id} className="bg-surface">{l.label}</option>)}
@@ -225,37 +345,60 @@ const Workspace = () => {
 
                   <div className="space-y-4">
                     <h4 className="text-[10px] font-black text-muted uppercase tracking-[0.2em]">Constraints</h4>
-                    <ul className="text-xs text-muted space-y-2 list-disc pl-4">
-                      {problem?.constraints?.split('\n').map((c, i) => <li key={i}>{c}</li>) || (
-                        <>
-                          <li>1 &lt;= nums.length &lt;= 10^4</li>
-                          <li>-10^9 &lt;= nums[i] &lt;= 10^9</li>
-                        </>
-                      )}
-                    </ul>
+                    <div className="bg-surface/30 border border-white/5 rounded-2xl p-5 shadow-inner">
+                      <ul className="text-xs font-mono text-primary/80 space-y-3 list-none">
+                        {problem?.constraints?.split('\n').map((c, i) => (
+                          <li key={i} className="flex items-center gap-3">
+                            <div className="w-1.5 h-1.5 rounded-full bg-primary/50 shadow-[0_0_8px_rgba(0,255,255,0.8)]" />
+                            {c}
+                          </li>
+                        )) || (
+                          <li className="text-muted/50 italic">No specific constraints provided</li>
+                        )}
+                      </ul>
+                    </div>
                   </div>
 
                   <div className="space-y-4">
-                    <h4 className="text-[10px] font-black text-muted uppercase tracking-[0.2em]">Example Operations</h4>
-                    <div className="space-y-4">
-                      {problem?.testCases?.filter(tc => !tc.isHidden).slice(0, 2).map((tc, i) => (
-                        <div key={i} className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden font-mono text-[11px]">
-                          <div className="px-4 py-2 border-b border-white/5 bg-white/5 flex justify-between items-center text-[10px] font-black text-muted uppercase tracking-widest">
-                            <span>Test Case #{i + 1}</span>
-                            <button className="text-primary hover:glow-cyan transition-all">Copy</button>
-                          </div>
-                          <div className="p-4 space-y-3">
+                    <h4 className="text-[10px] font-black text-muted uppercase tracking-[0.2em]">Public Test Cases</h4>
+                    <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+                      <div className="flex border-b border-white/5 bg-surface/40 overflow-x-auto custom-scrollbar">
+                        {problem?.testCases?.filter(tc => !tc.isHidden).map((tc, i) => (
+                          <button
+                            key={i}
+                            onClick={() => setActiveTestCaseTab(i)}
+                            className={`px-6 py-3 text-[10px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${
+                              activeTestCaseTab === i ? 'text-primary bg-white/5 border-b-2 border-primary shadow-[inset_0_-2px_10px_rgba(0,255,255,0.1)]' : 'text-muted hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            Case {i + 1}
+                          </button>
+                        ))}
+                      </div>
+                      
+                      <div className="p-5 font-mono text-xs space-y-6">
+                        {problem?.testCases?.filter(tc => !tc.isHidden)[activeTestCaseTab] && (
+                          <motion.div
+                            key={activeTestCaseTab}
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="space-y-5"
+                          >
                             <div>
-                              <span className="text-muted mr-2">Input:</span>
-                              <span className="text-white">{tc.input}</span>
+                              <span className="text-[10px] font-black text-muted uppercase tracking-widest block mb-2">Input</span>
+                              <div className="bg-black/30 border border-white/5 rounded-xl p-4 text-white whitespace-pre-wrap">
+                                {problem.testCases.filter(tc => !tc.isHidden)[activeTestCaseTab].input}
+                              </div>
                             </div>
                             <div>
-                              <span className="text-muted mr-2">Output:</span>
-                              <span className="text-green-400">{tc.output}</span>
+                              <span className="text-[10px] font-black text-muted uppercase tracking-widest block mb-2">Expected Output</span>
+                              <div className="bg-black/30 border border-white/5 rounded-xl p-4 text-green-400 whitespace-pre-wrap">
+                                {problem.testCases.filter(tc => !tc.isHidden)[activeTestCaseTab].expectedOutput}
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      ))}
+                          </motion.div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </motion.div>
@@ -345,6 +488,24 @@ const Workspace = () => {
                               <p className="text-[10px] text-muted mb-1.5 uppercase font-bold tracking-tighter">Passed</p>
                             </div>
                           </div>
+                          {results.summary?.runtimePercentile !== undefined && results.summary?.runtimePercentile !== null && (
+                            <div className="col-span-2 glass-card p-4 border-white/5 bg-gradient-to-r from-primary/10 to-transparent flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <Zap className="w-5 h-5 text-primary" />
+                                <div>
+                                  <p className="text-sm font-bold text-white">Beats {results.summary.runtimePercentile}%</p>
+                                  <p className="text-[10px] text-muted uppercase tracking-widest font-black">of users in Runtime</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <Cpu className="w-5 h-5 text-primary" />
+                                <div className="text-right">
+                                  <p className="text-sm font-bold text-white">Beats {results.summary.memoryPercentile}%</p>
+                                  <p className="text-[10px] text-muted uppercase tracking-widest font-black">of users in Memory</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
 

@@ -95,16 +95,64 @@ const submitCode = async (userId, problemId, language, sourceCode) => {
     });
 
     // 8. Update user stats (accuracy, streak, skill level)
-    await Promise.all([
-      userService.updateAccuracy(userId),
-      userService.updateStreak(userId),
-      updateUserSkillLevel(userId),
-    ]);
+    const updatePromises = [userService.updateAccuracy(userId)];
+    
+    // Only accepted submissions should extend the streak
+    if (verdict.overallResult === 'accepted') {
+      updatePromises.push(userService.updateStreak(userId));
+    }
+    
+    updatePromises.push(updateUserSkillLevel(userId));
+    await Promise.all(updatePromises);
 
     // 9. Background: trigger recommendation refresh (non-blocking)
     triggerRecommendationRefresh(userId).catch((err) => {
       logger.warn('Background recommendation refresh failed:', err.message);
     });
+
+    // 9.5 Calculate Percentiles if accepted
+    let runtimePercentile = null;
+    let memoryPercentile = null;
+
+    if (verdict.overallResult === 'accepted' && maxRuntime && maxMemory) {
+      const allAccepted = await prisma.submission.findMany({
+        where: { problemId, result: 'accepted' },
+        select: { runtime: true, memory: true }
+      });
+      
+      const currentRuntimeVal = parseFloat(maxRuntime);
+      const currentMemoryVal = parseFloat(maxMemory);
+      
+      if (!isNaN(currentRuntimeVal) && !isNaN(currentMemoryVal)) {
+        let slowerCount = 0;
+        let largerMemoryCount = 0;
+        let validRuntimeCount = 0;
+        let validMemoryCount = 0;
+
+        for (const sub of allAccepted) {
+          const rVal = parseFloat(sub.runtime);
+          const mVal = parseFloat(sub.memory);
+          
+          if (!isNaN(rVal)) {
+            validRuntimeCount++;
+            if (rVal >= currentRuntimeVal) slowerCount++; // >= so if it's the only one, it beats 0% or itself, wait > is better for percentile "beats X%"
+          }
+          if (!isNaN(mVal)) {
+            validMemoryCount++;
+            if (mVal >= currentMemoryVal) largerMemoryCount++;
+          }
+        }
+
+        // Beats % of users
+        runtimePercentile = validRuntimeCount > 0 
+          ? Math.round((slowerCount / validRuntimeCount) * 100) 
+          : 100;
+        
+        memoryPercentile = validMemoryCount > 0 
+          ? Math.round((largerMemoryCount / validMemoryCount) * 100) 
+          : 100;
+      }
+    }
 
     // 10. Return detailed response
     return {
@@ -142,6 +190,8 @@ const submitCode = async (userId, problemId, language, sourceCode) => {
         hiddenPassed: results.filter((r) => r.isHidden && r.passed).length,
         overallResult: verdict.overallResult,
         verdictMessage: verdict.message,
+        runtimePercentile,
+        memoryPercentile
       },
     };
   } catch (error) {

@@ -10,7 +10,9 @@
     "prisma:migrate": "npx prisma migrate dev",
     "prisma:push": "npx prisma db push",
     "prisma:studio": "npx prisma studio",
-    "prisma:seed": "node prisma/seed.js"
+    "prisma:seed": "node prisma/seed.js",
+    "seed:advanced-problems": "node prisma/advancedProblemSeeder.js",
+    "seed:contest": "node prisma/contestSeeder.js"
   },
   "keywords": [
     "skillconnect",

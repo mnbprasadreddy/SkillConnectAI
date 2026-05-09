@@ -1,6 +1,10 @@
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'http://localhost:5000';
+// Dynamically determine the default Socket URL based on the environment
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const defaultSocketUrl = isLocalhost ? 'http://localhost:5000' : window.location.origin;
+
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || defaultSocketUrl;
 
 class SocketService {
   constructor() {

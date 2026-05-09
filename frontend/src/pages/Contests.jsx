@@ -13,9 +13,11 @@ import {
   Search,
   Timer
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
 const Contests = () => {
+  const navigate = useNavigate();
   const [contests, setContests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('active');
@@ -25,7 +27,8 @@ const Contests = () => {
       try {
         setLoading(true);
         const response = await api.get('/contests');
-        setContests(response.data || []);
+        const contestsToSet = Array.isArray(response.data) ? response.data : [];
+        setContests(contestsToSet);
       } catch (err) {
         console.error('Failed to fetch contests', err);
       } finally {
@@ -34,6 +37,21 @@ const Contests = () => {
     };
     fetchContests();
   }, []);
+
+  const calculateTimeLeft = (endTime) => {
+    const difference = +new Date(endTime) - +new Date();
+    if (difference <= 0) return 'ENDED';
+    
+    const d = Math.floor(difference / (1000 * 60 * 60 * 24));
+    const h = Math.floor((difference / (1000 * 60 * 60)) % 24);
+    const m = Math.floor((difference / 1000 / 60) % 60);
+    const s = Math.floor((difference / 1000) % 60);
+    
+    if (d > 0) return `${d}d ${h}h ${m}m`;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
+
+  const [timeLeft, setTimeLeft] = useState('');
 
   const filteredContests = contests.filter(c => {
     const now = new Date();
@@ -44,6 +62,17 @@ const Contests = () => {
     if (activeTab === 'upcoming') return now < startTime;
     return now > endTime;
   });
+
+  useEffect(() => {
+    let timer;
+    if (activeTab === 'active' && filteredContests.length > 0) {
+      setTimeLeft(calculateTimeLeft(filteredContests[0].endTime));
+      timer = setInterval(() => {
+        setTimeLeft(calculateTimeLeft(filteredContests[0].endTime));
+      }, 1000);
+    }
+    return () => clearInterval(timer);
+  }, [activeTab, filteredContests]);
 
   if (loading) {
     return (
@@ -103,9 +132,15 @@ const Contests = () => {
               <div className="flex flex-wrap gap-4 pt-4">
                 <div className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-xl border border-white/5">
                   <Timer className="w-4 h-4 text-primary" />
-                  <span className="text-[10px] font-black uppercase">Ending in 02:14:55</span>
+                  <span className="text-[10px] font-black uppercase tracking-widest">{timeLeft !== 'ENDED' ? `Ending in ${timeLeft}` : 'ARENA CLOSED'}</span>
                 </div>
-                <button className="neon-button-cyan px-8 py-3 text-xs font-black uppercase tracking-[0.2em]">Enter Arena</button>
+                <button 
+                  className={`px-8 py-3 text-xs font-black uppercase tracking-[0.2em] ${timeLeft === 'ENDED' ? 'bg-white/5 text-muted cursor-not-allowed border border-white/10' : 'neon-button-cyan'}`}
+                  disabled={timeLeft === 'ENDED'}
+                  onClick={() => navigate(`/contests/${filteredContests[0].id}`)}
+                >
+                  {timeLeft === 'ENDED' ? 'Arena Closed' : 'Enter Arena'}
+                </button>
               </div>
             </div>
             <div className="w-full md:w-1/3 flex justify-center">
@@ -166,7 +201,10 @@ const Contests = () => {
                   ))}
                   <div className="w-6 h-6 rounded-full border-2 border-surface bg-white/5 flex items-center justify-center text-[8px] font-black text-muted">+</div>
                 </div>
-                <button className="flex items-center gap-2 text-[10px] font-black uppercase text-primary tracking-widest hover:gap-3 transition-all">
+                <button 
+                  onClick={() => navigate(`/contests/${contest.id}`)}
+                  className="flex items-center gap-2 text-[10px] font-black uppercase text-primary tracking-widest hover:gap-3 transition-all"
+                >
                   Arena Profile <ChevronRight className="w-4 h-4" />
                 </button>
               </div>

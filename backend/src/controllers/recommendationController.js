@@ -9,12 +9,8 @@ const response = require('../utils/apiResponse');
 const getRecommendations = asyncHandler(async (req, res) => {
   if (!req.user) return response.unauthorized(res);
   const recs = await recommendationService.getRecommendations(req.user.id);
-  // Parse JSON content for client convenience
-  const parsed = recs.map((r) => ({
-    ...r,
-    content: JSON.parse(r.content),
-  }));
-  return response.success(res, parsed);
+  // Content is already parsed in the service layer, no need to map/parse here.
+  return response.success(res, recs);
 });
 
 const generateRecommendations = asyncHandler(async (req, res) => {

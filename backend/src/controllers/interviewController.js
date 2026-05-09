@@ -39,8 +39,9 @@ const saveAnalytics = asyncHandler(async (req, res) => {
 });
 
 const getQuestions = asyncHandler(async (req, res) => {
+  if (!req.user) return response.unauthorized(res);
   const { interviewType, difficulty, count } = req.body;
-  const questions = await interviewService.generateQuestions(interviewType, difficulty, count);
+  const questions = await interviewService.generateQuestions(req.user.id, interviewType, difficulty, count);
   return response.success(res, questions);
 });
 

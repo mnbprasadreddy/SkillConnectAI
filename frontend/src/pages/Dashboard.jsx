@@ -39,12 +39,33 @@ const Dashboard = () => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const [dashResponse, recsResponse] = await Promise.all([
+        const [dashResponse, recsResponse, codingResponse] = await Promise.all([
           api.get('/analytics/dashboard'),
-          api.get('/recommendations')
+          api.get('/recommendations'),
+          api.get('/analytics/coding')
         ]);
-        setData(dashResponse);
-        setRecommendations(recsResponse);
+        
+        const dashboardData = dashResponse.data || {};
+        const codingData = codingResponse.data || {};
+        const recsData = Array.isArray(recsResponse.data) ? recsResponse.data : [];
+
+        console.log('[SafeDebug] Dashboard Hydrated:', dashboardData);
+        
+        // Merge coding stats into dashboard stats for the charts
+        if (codingData && dashboardData?.stats) {
+          dashboardData.stats.submissionTrend = codingData.submissionTrend;
+          
+          const diffBreakdown = {};
+          if (codingData.difficultyBreakdown) {
+            codingData.difficultyBreakdown.forEach(d => {
+              diffBreakdown[d.difficulty] = d.problemsSolved;
+            });
+          }
+          dashboardData.stats.problemsSolvedByDifficulty = diffBreakdown;
+        }
+        
+        setData(dashboardData);
+        setRecommendations(recsData);
       } catch (err) {
         console.error('Failed to fetch dashboard data', err);
       } finally {
@@ -113,28 +134,28 @@ const Dashboard = () => {
         <StatCard 
           icon={Target} 
           label="Problems Solved" 
-          value={data?.stats?.problemsSolved || 0} 
-          trend={`${data?.stats?.completionRate || 0}% Total`} 
+          value={data?.stats?.problemsSolved ?? user?.problemsSolved ?? 0} 
+          trend={`${data?.stats?.completionRate ?? 0}% Total`} 
           color="cyan" 
         />
         <StatCard 
           icon={Flame} 
           label="Current Streak" 
-          value={`${data?.user?.streak || 0} Days`} 
+          value={`${data?.user?.streak ?? user?.streak ?? 0} Days`} 
           trend="Level 1" 
           color="orange" 
         />
         <StatCard 
           icon={Zap} 
           label="Accuracy" 
-          value={`${data?.stats?.accuracy || 0}%`} 
+          value={`${data?.stats?.accuracy ?? user?.accuracy ?? 0}%`} 
           trend="Verified" 
           color="purple" 
         />
         <StatCard 
           icon={Trophy} 
           label="Interviews" 
-          value={data?.stats?.completedInterviews || 0} 
+          value={data?.stats?.completedInterviews ?? 0} 
           trend="Sessions" 
           color="green" 
         />

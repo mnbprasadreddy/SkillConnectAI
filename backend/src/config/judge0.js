@@ -5,9 +5,8 @@
 require('dotenv').config();
 
 const judge0Config = {
-  baseUrl: process.env.JUDGE0_API_URL || 'https://judge0-ce.p.rapidapi.com',
-  apiKey: process.env.JUDGE0_API_KEY || '',
-  apiHost: process.env.JUDGE0_API_HOST || 'judge0-ce.p.rapidapi.com',
+  baseUrl: process.env.JUDGE0_BASE_URL || 'https://ce.judge0.com',
+
 
   // Language ID mappings for Judge0 CE
   languages: {
@@ -28,12 +27,10 @@ const judge0Config = {
     'scala': 81,         // Scala (2.13.2)
   },
 
-  // Default headers for Judge0 RapidAPI
+  // Default headers for Judge0 Public CE
   getHeaders() {
     return {
       'Content-Type': 'application/json',
-      'X-RapidAPI-Key': this.apiKey,
-      'X-RapidAPI-Host': this.apiHost,
     };
   },
 

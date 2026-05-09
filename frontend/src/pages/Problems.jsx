@@ -33,16 +33,26 @@ const Problems = () => {
       };
       const response = await api.get('/problems', { params });
       
-      // Structure: { status, message, data: { data: problems, totalCount, extras: { topics } } }
-      const payload = response.data;
-      setProblems(payload.data || []);
-      setPagination(prev => ({ ...prev, totalCount: payload.totalCount || 0 }));
+      console.log("[Problems] Raw API Response:", response);
       
-      if (payload.extras?.topics) {
-        setTopics(payload.extras.topics);
+      const problemsToSet = response?.data || [];
+      
+      console.log("[Problems] Final Problems:", problemsToSet);
+      
+      setProblems(problemsToSet);
+      
+      console.log("[Problems] State Length:", problemsToSet.length);
+      
+      const paginationData = response?.pagination || response?.data?.pagination || {};
+      setPagination(prev => ({ ...prev, totalCount: paginationData.totalCount || 0 }));
+      
+      const topicsData = response.topics || response.data?.topics;
+      if (topicsData) {
+        setTopics(topicsData);
       }
     } catch (err) {
       console.error('Failed to fetch problems', err);
+      console.error('Error Details:', err.response?.data || err.message);
     } finally {
       setLoading(false);
     }
