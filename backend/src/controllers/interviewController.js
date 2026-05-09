@@ -8,9 +8,16 @@ const response = require('../utils/apiResponse');
 
 const createSession = asyncHandler(async (req, res) => {
   if (!req.user) return response.unauthorized(res);
-  const { interviewType, difficulty } = req.body;
-  const interview = await interviewService.createSession(req.user.id, interviewType, difficulty);
-  return response.created(res, interview, 'Interview session started');
+  const { interviewType, difficulty, role } = req.body;
+  console.log(`[InterviewSessionCreate] User: ${req.user.id}, Type: ${interviewType}, Difficulty: ${difficulty}, Role: ${role || 'none'}`);
+  try {
+    const interview = await interviewService.createSession(req.user.id, interviewType, difficulty, role);
+    console.log(`[InterviewSessionCreate] Success: Session ${interview.id}`);
+    return response.created(res, interview, 'Interview session started');
+  } catch (err) {
+    console.error(`[InterviewSessionCreate] Failed:`, err.message);
+    throw err;
+  }
 });
 
 const endSession = asyncHandler(async (req, res) => {
@@ -40,9 +47,32 @@ const saveAnalytics = asyncHandler(async (req, res) => {
 
 const getQuestions = asyncHandler(async (req, res) => {
   if (!req.user) return response.unauthorized(res);
-  const { interviewType, difficulty, count } = req.body;
-  const questions = await interviewService.generateQuestions(req.user.id, interviewType, difficulty, count);
+  const { interviewType, difficulty, count, role } = req.body;
+  const questions = await interviewService.generateQuestions(req.user.id, interviewType, difficulty, count, role);
   return response.success(res, questions);
 });
 
-module.exports = { createSession, endSession, getMyInterviews, getInterviewById, saveAnalytics, getQuestions };
+const getDeepgramToken = asyncHandler(async (req, res) => {
+  if (!req.user) return response.unauthorized(res);
+  const aiService = require('../services/aiService');
+  const tokenData = await aiService.getDeepgramToken();
+  return response.success(res, tokenData);
+});
+
+const executeCode = asyncHandler(async (req, res) => {
+  if (!req.user) return response.unauthorized(res);
+  const { language, sourceCode, stdin } = req.body;
+  const executionService = require('../services/interviewExecutionService');
+  const result = await executionService.executeInterviewCode(language, sourceCode, stdin);
+  return response.success(res, result);
+});
+
+const getHint = asyncHandler(async (req, res) => {
+  if (!req.user) return response.unauthorized(res);
+  const { language, sourceCode, questionDesc } = req.body;
+  const aiService = require('../services/aiService');
+  const result = await aiService.analyzeCode(language, sourceCode, questionDesc);
+  return response.success(res, result);
+});
+
+module.exports = { createSession, endSession, getMyInterviews, getInterviewById, saveAnalytics, getQuestions, getDeepgramToken, executeCode, getHint };

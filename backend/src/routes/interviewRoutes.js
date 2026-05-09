@@ -15,5 +15,8 @@ router.get('/', verifyToken, ctrl.getMyInterviews);
 router.get('/:id', verifyToken, interviewIdValidator, handleValidationErrors, ctrl.getInterviewById);
 router.post('/:id/analytics', verifyToken, ctrl.saveAnalytics);
 router.post('/questions', verifyToken, ctrl.getQuestions);
+router.get('/token/deepgram', verifyToken, ctrl.getDeepgramToken);
+router.post('/:id/execute', verifyToken, ctrl.executeCode);
+router.post('/:id/hint', verifyToken, ctrl.getHint);
 
 module.exports = router;

@@ -12,6 +12,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Problems = lazy(() => import('./pages/Problems'));
 const Workspace = lazy(() => import('./pages/Workspace'));
 const Interviews = lazy(() => import('./pages/Interviews'));
+const InterviewSetup = lazy(() => import('./pages/InterviewSetup'));
 const LiveInterview = lazy(() => import('./pages/LiveInterview'));
 const Report = lazy(() => import('./pages/Report'));
 const Profile = lazy(() => import('./pages/Profile'));
@@ -104,7 +105,7 @@ function App() {
             {/* Full Screen Pages */}
             <Route path="/problems/:id" element={<ProtectedRoute><Workspace /></ProtectedRoute>} />
             <Route path="/interviews/live/:id" element={<ProtectedRoute><LiveInterview /></ProtectedRoute>} />
-            <Route path="/interviews/setup" element={<ProtectedRoute><LiveInterview /></ProtectedRoute>} />
+            <Route path="/interviews/setup" element={<ProtectedRoute><InterviewSetup /></ProtectedRoute>} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" />} />

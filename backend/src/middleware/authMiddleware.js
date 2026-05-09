@@ -52,7 +52,8 @@ const verifyToken = async (req, res, next) => {
 };
 
 /**
- * Optional auth — does not fail if no token, but attaches user if present
+ * Optional auth — does not fail if no token, but attaches user if present.
+ * Uses a timeout guard so a slow DB connection never blocks public routes.
  */
 const optionalAuth = async (req, res, next) => {
   try {
@@ -68,12 +69,16 @@ const optionalAuth = async (req, res, next) => {
         name: decodedToken.name || '',
       };
 
-      const dbUser = await prisma.user.findUnique({
-        where: { firebaseUid: decodedToken.uid },
-      });
-
-      if (dbUser) {
-        req.user = dbUser;
+      // Wrap DB lookup in a 3s timeout — if Neon is slow/idle, skip gracefully
+      try {
+        const dbUser = await Promise.race([
+          prisma.user.findUnique({ where: { firebaseUid: decodedToken.uid } }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('DB timeout')), 3000))
+        ]);
+        if (dbUser) req.user = dbUser;
+      } catch (dbErr) {
+        // DB was slow or dropped — proceed without user data (public problems still load)
+        console.warn('[OptionalAuth] DB lookup skipped:', dbErr.message);
       }
     }
   } catch (error) {

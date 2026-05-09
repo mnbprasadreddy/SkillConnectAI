@@ -1,16 +1,44 @@
 // ═══════════════════════════════════════════════════════════════
 // SkillConnect AI — Server Entry Point
+// Auto-clears port conflicts before binding.
 // ═══════════════════════════════════════════════════════════════
 
 require('dotenv').config();
 
 const http = require('http');
+const { execSync } = require('child_process');
 const app = require('./app');
 const { initializeSocket } = require('./config/socket');
 const { setupSocketHandlers } = require('./socket/socketManager');
 const logger = require('./utils/logger');
 
 const PORT = process.env.PORT || 5000;
+
+// ── Auto-free the port before binding ────────────────────────────
+// This prevents EADDRINUSE on every restart without any manual steps.
+function freePort(port) {
+  try {
+    const pids = execSync(
+      `powershell -Command "(Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue).OwningProcess"`,
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }
+    ).trim();
+
+    if (pids) {
+      const pidList = [...new Set(pids.split(/\r?\n/).filter(Boolean))];
+      pidList.forEach(pid => {
+        try {
+          execSync(`powershell -Command "Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue"`, { stdio: 'ignore' });
+        } catch (_) {}
+      });
+      logger.info(`🧹 Auto-cleared port ${port} (killed PID: ${pidList.join(', ')})`);
+    }
+  } catch (_) {
+    // Port is already free — nothing to do
+  }
+}
+
+// Run the auto-clear before creating the server
+freePort(PORT);
 
 // Create HTTP server
 const server = http.createServer(app);
@@ -30,9 +58,19 @@ server.listen(PORT, async () => {
   logger.info(`  API: http://localhost:${PORT}`);
   logger.info(`  Health: http://localhost:${PORT}/api/health`);
   logger.info(`═══════════════════════════════════════════════════`);
-  
+
   // Validate Judge0 connection on startup
   await judge0Service.validateConnection();
+});
+
+// Fallback error handler (should rarely trigger now)
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    logger.error(`❌ Port ${PORT} still in use after auto-clear. Please restart.`);
+  } else {
+    logger.error('Server error:', error);
+  }
+  process.exit(1);
 });
 
 // Graceful shutdown
@@ -44,11 +82,11 @@ process.on('SIGTERM', () => {
   });
 });
 
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled Rejection:', reason);
 });
 
 process.on('uncaughtException', (error) => {
   logger.error('Uncaught Exception:', error);
-  process.exit(1);
+  server.close(() => process.exit(1));
 });

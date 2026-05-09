@@ -34,25 +34,26 @@ const Problems = () => {
       const response = await api.get('/problems', { params });
       
       console.log("[Problems] Raw API Response:", response);
-      
-      const problemsToSet = response?.data || [];
-      
-      console.log("[Problems] Final Problems:", problemsToSet);
-      
+
+      // api.js interceptor unwraps the response — root level has: data, pagination, topics
+      const problemsToSet = Array.isArray(response?.data) ? response.data : [];
+      console.log("[Problems] Problems loaded:", problemsToSet.length);
       setProblems(problemsToSet);
-      
-      console.log("[Problems] State Length:", problemsToSet.length);
-      
-      const paginationData = response?.pagination || response?.data?.pagination || {};
-      setPagination(prev => ({ ...prev, totalCount: paginationData.totalCount || 0 }));
-      
-      const topicsData = response.topics || response.data?.topics;
-      if (topicsData) {
+
+      // Pagination lives at root level of the unwrapped response
+      const paginationData = response?.pagination || {};
+      setPagination(prev => ({
+        ...prev,
+        totalCount: paginationData.totalCount ?? paginationData.total ?? 0
+      }));
+
+      // Topics live at root level too (spread via ...extras in apiResponse.paginated)
+      const topicsData = response?.topics;
+      if (Array.isArray(topicsData) && topicsData.length > 0) {
         setTopics(topicsData);
       }
     } catch (err) {
-      console.error('Failed to fetch problems', err);
-      console.error('Error Details:', err.response?.data || err.message);
+      console.error('Failed to fetch problems:', err.response?.data || err.message);
     } finally {
       setLoading(false);
     }

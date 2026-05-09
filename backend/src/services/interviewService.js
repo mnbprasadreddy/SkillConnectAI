@@ -11,12 +11,13 @@ const { emitInterviewAnalytics, emitInterviewScoreUpdate, emitInterviewQuestion 
 /**
  * Create a new interview session
  */
-const createSession = async (userId, interviewType, difficulty) => {
+const createSession = async (userId, interviewType, difficulty, role) => {
   const session = await prisma.interview.create({
     data: {
       userId,
       interviewType,
       difficulty,
+      role: role || null,
       status: 'in_progress',
     },
   });
@@ -40,6 +41,7 @@ const endSession = async (interviewId, data) => {
         confidenceScore: data.confidenceScore || null,
         communicationScore: data.communicationScore || null,
         technicalScore: data.technicalScore || null,
+        codingScore: data.codingScore || null,
         recordingUrl: data.recordingUrl || null,
         transcript: data.transcript || null,
       },
@@ -149,8 +151,27 @@ const saveAnalytics = async (interviewId, analyticsData) => {
 /**
  * Generate interview questions using AI service or fallback
  */
-const generateQuestions = async (userId, interviewType, difficulty, count = 5) => {
+const generateQuestions = async (userId, interviewType, difficulty, count = 5, role) => {
   try {
+    // Phase 1: Route HR and Behavioral interviews to the new Node.js aiService (Gemini)
+    if (interviewType === 'hr' || interviewType === 'behavioral') {
+      const aiService = require('./aiService');
+      return await aiService.generateHRQuestions(count);
+    }
+
+    // Phase 2: Route Role-Based Technical interviews to Gemini
+    if (interviewType === 'technical' && role) {
+      const aiService = require('./aiService');
+      return await aiService.generateTechnicalQuestions(role, difficulty, count);
+    }
+
+    // Phase 3: Route Live Coding interviews to Gemini
+    if (interviewType === 'coding') {
+      const aiService = require('./aiService');
+      return await aiService.generateCodingQuestions(difficulty, count);
+    }
+
+    // Existing technical/coding logic relies on the Python AI microservice
     const recommendationService = require('./recommendationService');
     let focusTopics = [];
     

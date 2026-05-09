@@ -79,12 +79,14 @@ model Interview {
   id                 Int                @id @default(autoincrement())
   userId             Int                @map("user_id")
   interviewType      String             @map("interview_type")
+  role               String?            
   difficulty         String
   duration           Int                @default(0)
   score              Float?
   confidenceScore    Float?             @map("confidence_score")
   communicationScore Float?             @map("communication_score")
   technicalScore     Float?             @map("technical_score")
+  codingScore        Float?             @map("coding_score")
   recordingUrl       String?            @map("recording_url")
   transcript         String?
   status             String             @default("in_progress")

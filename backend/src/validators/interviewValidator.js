@@ -11,8 +11,11 @@ const createInterviewValidator = [
     .withMessage('Interview type must be: behavioral, technical, system_design, coding, or hr'),
   body('difficulty')
     .notEmpty().withMessage('Difficulty is required')
-    .isIn(['Easy', 'Medium', 'Hard'])
-    .withMessage('Difficulty must be: Easy, Medium, or Hard'),
+    .isIn(['Easy', 'Medium', 'Hard', 'Beginner', 'Intermediate', 'Advanced', 'beginner', 'intermediate', 'advanced'])
+    .withMessage('Difficulty must be valid'),
+  body('role')
+    .optional()
+    .isString().withMessage('Role must be a string'),
 ];
 
 const endInterviewValidator = [
@@ -31,6 +34,9 @@ const endInterviewValidator = [
     .optional()
     .isFloat({ min: 0, max: 100 }),
   body('technicalScore')
+    .optional()
+    .isFloat({ min: 0, max: 100 }),
+  body('codingScore')
     .optional()
     .isFloat({ min: 0, max: 100 }),
   body('recordingUrl')
