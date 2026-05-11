@@ -1,16 +1,15 @@
 /**
- * LiveInterview — Orchestrator v5
+ * LiveInterview — Orchestrator v6
  *
  * STT Architecture:
  *  - useSTT hook handles the entire speech pipeline (Deepgram → Web Speech)
  *  - getUserMedia requests VIDEO ONLY — no audio track conflict with Web Speech
  *  - Audio track is exclusively managed by useSTT
- *  - Test button isolates STT from interview logic for debugging
  */
 
 import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { Clock, PhoneOff, ShieldCheck, Mic } from 'lucide-react';
+import { Clock, PhoneOff, ShieldCheck } from 'lucide-react';
 import api from '../services/api';
 import socketService from '../services/socketService';
 import { useAuth } from '../context/AuthContext';
@@ -427,42 +426,6 @@ const LiveInterview = () => {
     if (currentQuestionIndex > 0) setCurrentQuestionIndex(i => i - 1);
   }, [currentQuestionIndex]);
 
-  // ── Manual STT test button ────────────────────────────────────────────
-  const handleTestSTT = useCallback(() => {
-    console.log('[STT-TEST] Manual test triggered');
-    console.log('[STT-TEST] Browser:', navigator.userAgent);
-    
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert('SpeechRecognition not supported in this browser'); return; }
-
-    setSttStatus('🧪 Running STT test...');
-    
-    if (!testSTTRef.current) {
-      const test = new SR();
-      test.continuous     = false;
-      test.interimResults = true;
-      test.lang           = 'en-US';
-      test.onstart        = () => { console.log('[STT-TEST] onstart ✓'); setSttStatus('🧪 Test: speak now...'); };
-      test.onaudiostart   = () => { console.log('[STT-TEST] onaudiostart ✓ — mic capturing'); };
-      test.onspeechstart  = () => { console.log('[STT-TEST] onspeechstart ✓ — speech detected'); };
-      test.onresult       = (e) => {
-        let finalTranscript = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript;
-        }
-        if (finalTranscript) {
-           console.log('[STT-TEST] onresult final:', finalTranscript);
-           setSttStatus(`🧪 Test heard: "${finalTranscript}"`);
-        }
-      };
-      test.onerror        = (e) => { console.error('[STT-TEST] onerror:', e.error); setSttStatus(`🔴 Test error: ${e.error}`); };
-      test.onend          = () => { console.log('[STT-TEST] onend'); setTimeout(() => setSttStatus('🎤 Listening...'), 3000); };
-      testSTTRef.current = test;
-    }
-    
-    try { testSTTRef.current.start(); console.log('[STT-TEST] start() called'); }
-    catch (e) { console.error('[STT-TEST] start() failed:', e.message); }
-  }, []);
 
   // ── Render: loading ───────────────────────────────────────────────────
   if (loading) return (
@@ -524,16 +487,6 @@ const LiveInterview = () => {
             <ShieldCheck className="w-3.5 h-3.5 text-green-400" />
             <span className="text-[10px] font-black uppercase tracking-widest text-green-400/80">Neural Safeguard</span>
           </div>
-
-          {/* ── STT Test Button ── */}
-          <button
-            onClick={handleTestSTT}
-            title="Test speech recognition — open DevTools Console to see logs"
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[9px] font-black uppercase tracking-widest text-amber-400 hover:bg-amber-500/20 transition-all"
-          >
-            <Mic className="w-3 h-3" />
-            Test Mic
-          </button>
 
           {role && (
             <div className="px-3 py-1 bg-primary/10 rounded-xl border border-primary/20">
@@ -625,32 +578,6 @@ const LiveInterview = () => {
             sttStatus={sttStatus}
           />
         </Suspense>
-
-        {/* TEMPORARY STT DEBUG PANEL & FALLBACK */}
-        <div className="fixed bottom-4 left-4 z-50 bg-black/95 text-cyan-400 p-4 rounded border border-cyan-500/50 shadow-[0_0_15px_rgba(0,255,255,0.2)] font-mono text-sm w-80">
-          <div className="font-bold border-b border-cyan-800 mb-2 pb-1 flex justify-between">
-            <span>STT DIAGNOSTICS</span>
-            <span className="text-xs opacity-50">v5.debug</span>
-          </div>
-          <div className="mb-1">Status: <span className="text-white">{sttStatus}</span></div>
-          <div className="mb-1 truncate">Partial: <span className="text-white">{currentPartial || '<none>'}</span></div>
-          <div className="mb-3">Transcript Lines: <span className="text-white">{transcript.length}</span></div>
-          
-          <div className="border-t border-cyan-800 pt-2">
-            <div className="text-xs mb-1 opacity-80">Fallback Typing Mode (Press Enter)</div>
-            <input 
-              type="text" 
-              className="w-full bg-slate-900 border border-cyan-800 rounded px-2 py-1 text-white text-xs outline-none focus:border-cyan-400"
-              placeholder="Type simulated speech..."
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && e.target.value.trim()) {
-                  handleFinal(e.target.value);
-                  e.target.value = '';
-                }
-              }}
-            />
-          </div>
-        </div>
 
       </main>
     </div>

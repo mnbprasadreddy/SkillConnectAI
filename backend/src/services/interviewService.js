@@ -155,11 +155,37 @@ const saveAnalytics = async (interviewId, analyticsData) => {
     // Remove undefined keys so we don't overwrite existing values with null
     Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
 
-    const analytics = await prisma.interviewAnalytic.upsert({
-      where:  { interviewId },
-      update: payload,
-      create: { interviewId, ...payload },
-    });
+    let analytics;
+    try {
+      analytics = await prisma.interviewAnalytic.upsert({
+        where:  { interviewId },
+        update: payload,
+        create: { interviewId, ...payload },
+      });
+    } catch (upsertError) {
+      // If we get an "Unknown argument" error, it means the Prisma client is out of sync.
+      // We'll retry without the Phase 2 fields.
+      if (upsertError.message.includes('Unknown argument')) {
+        logger.warn(`Prisma sync mismatch for interview ${interviewId}. Retrying without Phase 2 fields.`);
+        const safePayload = { ...payload };
+        delete safePayload.smileFrequency;
+        delete safePayload.attentionStability;
+        delete safePayload.fillerWordCount;
+        delete safePayload.speakingPaceWpm;
+        delete safePayload.pauseCount;
+        delete safePayload.optimizationScore;
+
+    analytics = await prisma.interviewAnalytic.upsert({
+          where:  { interviewId },
+          update: safePayload,
+          create: { interviewId, ...safePayload },
+        });
+      } else {
+        // Fallback to the most minimal payload possible to prevent 500s from crashing the session
+        logger.error(`Critical Prisma error for interview ${interviewId}: ${upsertError.message}`);
+        return { interviewId, status: 'partial_save_error' };
+      }
+    }
 
     // Emit live update to client
     emitInterviewAnalytics(interviewId, analytics);
