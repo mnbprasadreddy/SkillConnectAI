@@ -18,6 +18,9 @@ const contestRoutes = require('./routes/contestRoutes');
 const recommendationRoutes = require('./routes/recommendationRoutes');
 const reportRoutes = require('./routes/reportRoutes');
 const roadmapRoutes = require('./routes/roadmapRoutes');
+const materialRoutes = require('./routes/materialRoutes');
+const adminRoutes = require('./routes/adminRoutes');
+const aiCoachRoutes = require('./routes/aiCoachRoutes');
 
 // Middleware imports
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
@@ -28,8 +31,31 @@ const app = express();
 // ─── Global Middleware ─────────────────────────────────────────
 app.use(helmet());
 app.use(cors({
-  origin: process.env.CLIENT_URL || '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  origin: (origin, callback) => {
+    console.log(`[CORS] Incoming origin: ${origin}`);
+    const allowedOrigins = [
+      'http://localhost:5173',
+      'http://localhost:5174',
+      'http://localhost:5175'
+    ];
+    
+    // Keep environment variables supported for future deployments
+    if (process.env.CLIENT_URL) {
+      process.env.CLIENT_URL.split(',').forEach(url => {
+        if (url.trim()) allowedOrigins.push(url.trim());
+      });
+    }
+
+    if (!origin || allowedOrigins.includes(origin)) {
+      console.log(`[CORS] Allowed origin: ${origin || 'NO_ORIGIN'}`);
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] Blocked origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
 app.use(compression());
@@ -131,6 +157,9 @@ app.use('/api/contests', contestRoutes);
 app.use('/api/recommendations', recommendationRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/roadmap', roadmapRoutes);
+app.use('/api/materials', materialRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/ai-coach', aiCoachRoutes);
 
 // ─── Error Handling ────────────────────────────────────────────
 app.use(notFoundHandler);

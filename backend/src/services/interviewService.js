@@ -12,6 +12,24 @@ const { emitInterviewAnalytics, emitInterviewScoreUpdate, emitInterviewQuestion 
  * Create a new interview session
  */
 const createSession = async (userId, interviewType, difficulty, role) => {
+  // Dedup guard: return existing in-progress session if created within last 5 minutes.
+  // Prevents "Too Many Requests" from frontend double-init or rapid refresh.
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+  const existing = await prisma.interview.findFirst({
+    where: {
+      userId,
+      interviewType,
+      status: 'in_progress',
+      createdAt: { gte: fiveMinutesAgo },
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  if (existing) {
+    logger.info(`[Interview] Returning existing session ${existing.id} for user ${userId} (dedup)`);
+    return existing;
+  }
+
   const session = await prisma.interview.create({
     data: {
       userId,
@@ -22,9 +40,10 @@ const createSession = async (userId, interviewType, difficulty, role) => {
     },
   });
 
-  logger.info(`New interview session created: ${session.id} for user ${userId}`);
+  logger.info(`[Interview] New session created: ${session.id} for user ${userId}`);
   return session;
 };
+
 
 /**
  * End an interview session with scores and trigger report generation
@@ -117,35 +136,45 @@ const getInterviewById = async (id) => {
  */
 const saveAnalytics = async (interviewId, analyticsData) => {
   try {
+    const payload = {
+      eyeContactScore:    analyticsData.eyeContactScore    ?? undefined,
+      postureScore:       analyticsData.postureScore       ?? undefined,
+      speechClarity:      analyticsData.speechClarity      ?? undefined,
+      nervousnessScore:   analyticsData.nervousnessScore   ?? undefined,
+      speakingSpeed:      analyticsData.speakingSpeed      ?? undefined,
+      emotionDetected:    analyticsData.emotionDetected    ?? undefined,
+      // Extended fields (Phase 2)
+      smileFrequency:     analyticsData.smileFrequency     ?? undefined,
+      attentionStability: analyticsData.attentionStability ?? undefined,
+      fillerWordCount:    analyticsData.fillerWordCount    ?? undefined,
+      speakingPaceWpm:    analyticsData.speakingPaceWpm    ?? undefined,
+      pauseCount:         analyticsData.pauseCount         ?? undefined,
+      optimizationScore:  analyticsData.optimizationScore  ?? undefined,
+    };
+
+    // Remove undefined keys so we don't overwrite existing values with null
+    Object.keys(payload).forEach(k => payload[k] === undefined && delete payload[k]);
+
     const analytics = await prisma.interviewAnalytic.upsert({
-      where: { interviewId },
-      update: {
-        eyeContactScore: analyticsData.eyeContactScore,
-        postureScore: analyticsData.postureScore,
-        speechClarity: analyticsData.speechClarity,
-        nervousnessScore: analyticsData.nervousnessScore,
-        speakingSpeed: analyticsData.speakingSpeed,
-        emotionDetected: analyticsData.emotionDetected,
-      },
-      create: {
-        interviewId,
-        eyeContactScore: analyticsData.eyeContactScore,
-        postureScore: analyticsData.postureScore,
-        speechClarity: analyticsData.speechClarity,
-        nervousnessScore: analyticsData.nervousnessScore,
-        speakingSpeed: analyticsData.speakingSpeed,
-        emotionDetected: analyticsData.emotionDetected,
-      },
+      where:  { interviewId },
+      update: payload,
+      create: { interviewId, ...payload },
     });
 
     // Emit live update to client
     emitInterviewAnalytics(interviewId, analytics);
-
     return analytics;
   } catch (error) {
     logger.error(`Error saving analytics for interview ${interviewId}:`, error.message);
     throw error;
   }
+};
+
+/**
+ * Save final analytics snapshot at end of session (called once, from frontend)
+ */
+const saveFinalAnalytics = async (interviewId, analyticsData) => {
+  return saveAnalytics(interviewId, analyticsData);
 };
 
 /**
@@ -263,5 +292,6 @@ module.exports = {
   getInterviewsByUser,
   getInterviewById,
   saveAnalytics,
+  saveFinalAnalytics,
   generateQuestions,
 };

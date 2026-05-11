@@ -14,7 +14,6 @@ const Workspace = lazy(() => import('./pages/Workspace'));
 const Interviews = lazy(() => import('./pages/Interviews'));
 const InterviewSetup = lazy(() => import('./pages/InterviewSetup'));
 const LiveInterview = lazy(() => import('./pages/LiveInterview'));
-const Report = lazy(() => import('./pages/Report'));
 const Profile = lazy(() => import('./pages/Profile'));
 const LandingPage = lazy(() => import('./pages/LandingPage'));
 const Recommendations = lazy(() => import('./pages/Recommendations'));
@@ -26,6 +25,15 @@ const ReplayCenter = lazy(() => import('./pages/ReplayCenter'));
 const Analytics = lazy(() => import('./pages/Analytics'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Community = lazy(() => import('./pages/Community'));
+const AdminPanel = lazy(() => import('./pages/AdminPanel'));
+const AdminProblems = lazy(() => import('./pages/AdminProblems'));
+const AdminContests = lazy(() => import('./pages/AdminContests'));
+const AdminMaterials = lazy(() => import('./pages/AdminMaterials'));
+const AdminAccess = lazy(() => import('./pages/AdminAccess'));
+const AdminRoadmaps = lazy(() => import('./pages/AdminRoadmaps'));
+const InterviewAnalytics = lazy(() => import('./pages/InterviewAnalytics'));
+const DeepgramTest = lazy(() => import('./pages/DeepgramTest'));
+import AdminRoute from './components/AdminRoute';
 
 const LoadingFallback = () => (
   <div className="h-screen w-screen bg-background flex items-center justify-center">
@@ -88,7 +96,7 @@ function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="problems" element={<Problems />} />
               <Route path="interviews" element={<Interviews />} />
-              <Route path="interviews/report/:id" element={<Report />} />
+              <Route path="interviews/analytics" element={<InterviewAnalytics />} />
               <Route path="contests" element={<Contests />} />
               <Route path="contests/:id" element={<ContestArena />} />
               <Route path="recommendations" element={<Recommendations />} />
@@ -96,16 +104,22 @@ function App() {
               <Route path="learning" element={<LearningMaterials />} />
               <Route path="replays" element={<ReplayCenter />} />
               <Route path="analytics" element={<Analytics />} />
-              <Route path="reports" element={<Report />} />
               <Route path="community" element={<Community />} />
               <Route path="profile" element={<Profile />} />
               <Route path="settings" element={<Settings />} />
+              <Route path="admin" element={<AdminRoute><AdminPanel /></AdminRoute>} />
+              <Route path="admin/problems" element={<AdminRoute><AdminProblems /></AdminRoute>} />
+              <Route path="admin/contests" element={<AdminRoute><AdminContests /></AdminRoute>} />
+              <Route path="admin/materials" element={<AdminRoute><AdminMaterials /></AdminRoute>} />
+              <Route path="admin/access" element={<AdminRoute><AdminAccess /></AdminRoute>} />
+              <Route path="admin/roadmaps" element={<AdminRoute><AdminRoadmaps /></AdminRoute>} />
             </Route>
 
             {/* Full Screen Pages */}
             <Route path="/problems/:id" element={<ProtectedRoute><Workspace /></ProtectedRoute>} />
             <Route path="/interviews/live/:id" element={<ProtectedRoute><LiveInterview /></ProtectedRoute>} />
             <Route path="/interviews/setup" element={<ProtectedRoute><InterviewSetup /></ProtectedRoute>} />
+            <Route path="/test/deepgram" element={<DeepgramTest />} />
 
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" />} />

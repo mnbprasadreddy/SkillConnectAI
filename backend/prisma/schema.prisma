@@ -14,6 +14,7 @@ model User {
   email              String              @unique
   profileImage       String?             @map("profile_image")
   skillLevel         String              @default("beginner") @map("skill_level")
+  role               String              @default("user")
   accuracy           Float               @default(0)
   streak             Int                 @default(0)
   createdAt          DateTime            @default(now()) @map("created_at")
@@ -23,6 +24,7 @@ model User {
   learningRoadmaps   LearningRoadmap[]
   recommendations    Recommendation[]
   submissions        Submission[]
+  weakTopics         WeakTopic[]
 
   @@map("users")
 }
@@ -36,6 +38,7 @@ model Problem {
   constraints     String?
   examples        String?
   starterCode     String?          @map("starter_code")
+  isArchived      Boolean          @default(false) @map("is_archived")
   createdAt       DateTime         @default(now()) @map("created_at")
   updatedAt       DateTime         @updatedAt @map("updated_at")
   submissions     Submission[]
@@ -51,6 +54,7 @@ model TestCase {
   input          String
   expectedOutput String   @map("expected_output")
   isHidden       Boolean  @default(false) @map("is_hidden")
+  isArchived     Boolean  @default(false) @map("is_archived")
   createdAt      DateTime @default(now()) @map("created_at")
   problem        Problem  @relation(fields: [problemId], references: [id], onDelete: Cascade)
 
@@ -100,16 +104,23 @@ model Interview {
 }
 
 model InterviewAnalytic {
-  id               Int       @id @default(autoincrement())
-  interviewId      Int       @unique @map("interview_id")
-  eyeContactScore  Float?    @map("eye_contact_score")
-  postureScore     Float?    @map("posture_score")
-  speechClarity    Float?    @map("speech_clarity")
-  nervousnessScore Float?    @map("nervousness_score")
-  speakingSpeed    Float?    @map("speaking_speed")
-  emotionDetected  String?   @map("emotion_detected")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  interview        Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  id                  Int       @id @default(autoincrement())
+  interviewId         Int       @unique @map("interview_id")
+  eyeContactScore     Float?    @map("eye_contact_score")
+  postureScore        Float?    @map("posture_score")
+  speechClarity       Float?    @map("speech_clarity")
+  nervousnessScore    Float?    @map("nervousness_score")
+  speakingSpeed       Float?    @map("speaking_speed")
+  emotionDetected     String?   @map("emotion_detected")
+  // Extended analytics fields (Phase 2)
+  smileFrequency      Float?    @map("smile_frequency")
+  attentionStability  Float?    @map("attention_stability")
+  fillerWordCount     Int?      @map("filler_word_count")
+  speakingPaceWpm     Int?      @map("speaking_pace_wpm")
+  pauseCount          Int?      @map("pause_count")
+  optimizationScore   Float?    @map("optimization_score")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  interview           Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
 
   @@map("interview_analytics")
 }
@@ -121,6 +132,10 @@ model Report {
   weaknesses      String?
   recommendations String?
   aiSummary       String?   @map("ai_summary")
+  // Extended report fields (Phase 2)
+  careerSummary   String?   @map("career_summary")
+  weakConcepts    Json?     @map("weak_concepts")
+  codingAccuracy  Float?    @map("coding_accuracy")
   createdAt       DateTime  @default(now()) @map("created_at")
   interview       Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
 
@@ -135,6 +150,7 @@ model Contest {
   endTime     DateTime            @map("end_time")
   difficulty  String
   status      String              @default("upcoming")
+  isArchived  Boolean             @default(false) @map("is_archived")
   createdAt   DateTime            @default(now()) @map("created_at")
   submissions ContestSubmission[]
   problems    ContestProblem[]
@@ -194,4 +210,127 @@ model Recommendation {
   user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("recommendations")
+}
+
+// ─── LEARNING MATERIAL ──────────────────────────────────────────
+model Material {
+  id          Int      @id @default(autoincrement())
+  title       String
+  topic       String
+  difficulty  String   @default("Beginner")
+  description String?
+  articleUrl  String?  @map("article_url")
+  youtubeUrl  String?  @map("youtube_url")
+  pdfUrl      String?  @map("pdf_url")
+  tags        String?
+  isArchived  Boolean  @default(false) @map("is_archived")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("materials")
+}
+
+// ─── ADMIN AUDIT LOG ────────────────────────────────────────────
+model AdminLog {
+  id         Int      @id @default(autoincrement())
+  adminId    Int      @map("admin_id")
+  action     String
+  targetType String   @map("target_type")
+  targetId   String?  @map("target_id")
+  details    String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("admin_logs")
+}
+
+// ─── WEAK TOPIC (AI Engine) ─────────────────────────────────────
+model WeakTopic {
+  id                Int      @id @default(autoincrement())
+  userId            Int      @map("user_id")
+  topic             String
+  score             Float    @default(0)
+  severity          String   @default("moderate")
+  acceptedRate      Float?   @map("accepted_rate")
+  contestScore      Float?   @map("contest_score")
+  interviewScore    Float?   @map("interview_score")
+  consistency       Float?   @default(0)
+  optimizationScore Float?   @default(0) @map("optimization_score")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, topic])
+  @@map("weak_topics")
+}
+
+// ─── RECOMMENDATION ANALYTICS (AI Snapshots) ────────────────────
+model RecommendationAnalytics {
+  id             Int      @id @default(autoincrement())
+  userId         Int      @map("user_id")
+  topic          String
+  acceptedRate   Float?   @default(0) @map("accepted_rate")
+  contestScore   Float?   @default(0) @map("contest_score")
+  interviewScore Float?   @default(0) @map("interview_score")
+  optimization   Float?   @default(0)
+  consistency    Float?   @default(0)
+  finalScore     Float?   @default(0) @map("final_score")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("recommendation_analytics")
+}
+
+// ─── AI ROADMAP SYSTEM ──────────────────────────────────────────
+model RoadmapTopic {
+  id           Int             @id @default(autoincrement())
+  title        String
+  slug         String          @unique
+  description  String?
+  totalModules Int             @default(0) @map("total_modules")
+  difficulty   String?
+  roleTrack    String?         @map("role_track")
+  isArchived   Boolean         @default(false) @map("is_archived")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  modules      RoadmapModule[]
+
+  @@map("roadmap_topics")
+}
+
+model RoadmapModule {
+  id               Int          @id @default(autoincrement())
+  topicId          Int          @map("topic_id")
+  title            String
+  description      String?
+  difficulty       String
+  orderIndex       Int          @map("order_index")
+  estimatedHours   Int?         @map("estimated_hours")
+  concepts         Json
+  milestones       Json?
+  checkpoints      Json?
+  // ─── AI-Generated Detailed Content (generated once at creation) ───
+  theory           Json?
+  examples         Json?
+  codeSnippets     Json?        @map("code_snippets")
+  bestPractices    Json?        @map("best_practices")
+  commonMistakes   Json?        @map("common_mistakes")
+  interviewTips    Json?        @map("interview_tips")
+  miniExercises    Json?        @map("mini_exercises")
+  practiceProblems Json?        @map("practice_problems")
+  isLocked         Boolean      @default(true) @map("is_locked")
+  topic            RoadmapTopic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@map("roadmap_modules")
+}
+
+model UserRoadmapProgress {
+  id          Int       @id @default(autoincrement())
+  userId      Int       @map("user_id")
+  moduleId    Int       @map("module_id")
+  completed   Boolean   @default(false)
+  score       Float?
+  unlockedAt  DateTime? @map("unlocked_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([userId, moduleId])
+  @@map("user_roadmap_progress")
 }

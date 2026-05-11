@@ -8,12 +8,7 @@ const Navbar = () => {
   return (
     <header className="fixed top-0 right-0 left-64 h-20 bg-background/50 backdrop-blur-md border-b border-white/5 z-40 px-8 flex items-center justify-between">
       <div className="relative w-96">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted" />
-        <input 
-          type="text" 
-          placeholder="Search problems, topics..." 
-          className="w-full bg-white/5 border border-white/10 rounded-full py-2 pl-12 pr-4 text-sm focus:outline-none focus:border-primary/50 transition-all"
-        />
+        {/* Search bar temporarily hidden per user request */}
       </div>
 
       <div className="flex items-center gap-6">

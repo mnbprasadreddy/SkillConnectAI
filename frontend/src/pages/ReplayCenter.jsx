@@ -27,8 +27,9 @@ const ReplayCenter = () => {
     const fetchReports = async () => {
       try {
         setLoading(true);
-        const response = await api.get('/reports/mine');
-        setReports(response.data || []);
+        const response = await api.get('/interviews');
+        const raw = response.data?.data || response.data || [];
+        setReports(Array.isArray(raw) ? raw : []);
       } catch (err) {
         console.error('Failed to fetch reports', err);
       } finally {
@@ -76,7 +77,7 @@ const ReplayCenter = () => {
 
       {/* Featured Replay Card */}
       {reports.length > 0 && (
-        <div className="glass-card p-1 relative overflow-hidden group cursor-pointer" onClick={() => navigate(`/app/interviews/report/${reports[0].interviewId}`)}>
+        <div className="glass-card p-1 relative overflow-hidden group cursor-pointer" onClick={() => navigate('/app/interviews/analytics')}>
           <div className="absolute inset-0 bg-primary/10 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="relative glass-card m-0.5 p-10 flex flex-col md:flex-row items-center gap-10">
             <div className="w-full md:w-1/2 aspect-video bg-black/40 rounded-3xl border border-white/10 flex items-center justify-center relative overflow-hidden">
@@ -88,7 +89,7 @@ const ReplayCenter = () => {
             </div>
             <div className="flex-1 space-y-6">
               <div>
-                <h3 className="text-3xl font-black uppercase italic tracking-tight">{reports[0].title || 'Technical Synthesis Session'}</h3>
+                <h3 className="text-3xl font-black uppercase italic tracking-tight capitalize">{reports[0].interviewType?.replace('_', ' ') || 'Interview'} Session</h3>
                 <div className="flex items-center gap-4 mt-2">
                   <div className="flex items-center gap-2 text-muted">
                     <Calendar className="w-4 h-4" />
@@ -97,7 +98,7 @@ const ReplayCenter = () => {
                   <div className="h-3 w-px bg-white/10" />
                   <div className="flex items-center gap-2 text-primary font-black">
                     <Award className="w-4 h-4" />
-                    <span className="text-[10px] uppercase">Score: {reports[0].overallScore}%</span>
+                    <span className="text-[10px] uppercase">Score: {reports[0].score ?? 'N/A'}%</span>
                   </div>
                 </div>
               </div>
@@ -134,7 +135,7 @@ const ReplayCenter = () => {
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: i * 0.1 }}
             className="glass-card p-6 group hover:border-primary/30 transition-all cursor-pointer"
-            onClick={() => navigate(`/app/interviews/report/${report.interviewId}`)}
+            onClick={() => navigate('/app/interviews/analytics')}
           >
             <div className="aspect-video bg-black/40 rounded-2xl border border-white/5 mb-6 relative overflow-hidden">
                <div className="absolute inset-0 bg-primary/5 group-hover:bg-primary/10 transition-colors" />
@@ -143,7 +144,7 @@ const ReplayCenter = () => {
 
             <div className="space-y-4">
               <div className="flex justify-between items-start">
-                <h4 className="text-lg font-bold text-white group-hover:text-primary transition-colors truncate pr-4">{report.title || 'Technical Assessment'}</h4>
+                <h4 className="text-lg font-bold text-white group-hover:text-primary transition-colors truncate pr-4 capitalize">{report.interviewType?.replace('_', ' ') || 'Interview Session'}</h4>
                 <button className="p-1 hover:bg-white/5 rounded-lg transition-colors"><MoreVertical className="w-4 h-4 text-muted" /></button>
               </div>
 
@@ -154,7 +155,7 @@ const ReplayCenter = () => {
                 </div>
                 <div className="flex items-center gap-2 text-primary">
                   <TrendingUp className="w-3.5 h-3.5" />
-                  <span>{report.overallScore}%</span>
+                  <span>{report.overallScore ?? report.score ?? 'N/A'}%</span>
                 </div>
               </div>
 

@@ -9,7 +9,8 @@ import {
   MessageSquare,
   ShieldAlert,
   ArrowRight,
-  ChevronRight
+  ChevronRight,
+  TrendingUp
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import api from '../services/api';
@@ -23,10 +24,10 @@ const Interviews = () => {
   const [loading, setLoading] = useState(true);
 
   const interviewTypes = [
-    { id: 'behavioral', label: 'Behavioral', icon: MessageSquare, color: 'cyan', desc: 'Focus on STAR method and soft skills.' },
-    { id: 'technical', label: 'Technical', icon: Brain, color: 'purple', desc: 'Core fundamentals and concept deep-dives.' },
-    { id: 'system_design', label: 'System Design', icon: BarChart3, color: 'orange', desc: 'Scalability, architecture, and tradeoffs.' },
-    { id: 'coding', label: 'Live Coding', icon: Video, color: 'green', desc: 'Problem solving with real-time feedback.' },
+    { id: 'behavioral', label: 'Behavioral / HR',   icon: MessageSquare, color: 'cyan',   desc: 'STAR method, soft skills, and behavioral questions.' },
+    { id: 'technical',  label: 'Technical',          icon: Brain,         color: 'purple', desc: 'Core fundamentals, concepts, and role-specific depth.' },
+    { id: 'system_design', label: 'System Design',  icon: BarChart3,     color: 'orange', desc: 'Scalability, architecture, and design tradeoffs.' },
+    { id: 'coding',     label: 'Live Coding',        icon: Video,         color: 'green',  desc: 'Problem solving with Monaco editor and real-time feedback.' },
   ];
 
   useEffect(() => {
@@ -34,7 +35,7 @@ const Interviews = () => {
       try {
         setLoading(true);
         const [historyRes, statsRes] = await Promise.all([
-          api.get('/interviews/mine'),
+          api.get('/interviews'),
           api.get('/analytics/interview')
         ]);
         setHistory(historyRes.data);
@@ -59,13 +60,22 @@ const Interviews = () => {
           <h1 className="text-4xl font-bold tracking-tight">AI Interview Hub</h1>
           <p className="text-muted mt-1">Master your communication with our advanced neural interviewer.</p>
         </div>
-        <button 
-          onClick={() => startInterview('behavioral')}
-          className="neon-button-cyan flex items-center gap-2"
-        >
-          <Plus className="w-5 h-5" />
-          Quick Start
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/app/interviews/analytics')}
+            className="neon-button-purple flex items-center gap-2"
+          >
+            <TrendingUp className="w-5 h-5" />
+            Analytics
+          </button>
+          <button 
+            onClick={() => startInterview('behavioral')}
+            className="neon-button-cyan flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" />
+            Quick Start
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -161,7 +171,7 @@ const Interviews = () => {
                         <p className="text-sm font-bold">{session.score || 0}/100</p>
                       </div>
                       <button 
-                        onClick={() => navigate(`/app/interviews/report/${session.id}`)}
+                        onClick={() => navigate(`/app/interviews/analytics`)}
                         className="p-2 hover:bg-white/10 rounded-lg transition-colors text-muted hover:text-white"
                       >
                         <ChevronRight className="w-5 h-5" />

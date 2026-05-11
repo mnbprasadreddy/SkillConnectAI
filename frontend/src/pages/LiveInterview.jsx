@@ -1,598 +1,698 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+/**
+ * LiveInterview — Orchestrator v5
+ *
+ * STT Architecture:
+ *  - useSTT hook handles the entire speech pipeline (Deepgram → Web Speech)
+ *  - getUserMedia requests VIDEO ONLY — no audio track conflict with Web Speech
+ *  - Audio track is exclusively managed by useSTT
+ *  - Test button isolates STT from interview logic for debugging
+ */
+
+import React, { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import {
-  Mic,
-  MicOff,
-  Video,
-  VideoOff,
-  PhoneOff,
-  Settings,
-  MessageSquare,
-  ShieldCheck,
-  Zap,
-  Clock,
-  BrainCircuit,
-  ChevronRight,
-  Eye,
-  Activity,
-  Smile
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Clock, PhoneOff, ShieldCheck, Mic } from 'lucide-react';
 import api from '../services/api';
 import socketService from '../services/socketService';
 import { useAuth } from '../context/AuthContext';
-import LiveCodingWorkspace from '../components/LiveCodingWorkspace';
+import { useFaceAnalytics } from '../components/interview/FaceAnalyticsEngine';
+import { useSTT } from '../hooks/useSTT';
+
+const InterviewHUD            = lazy(() => import('../components/interview/InterviewHUD'));
+const HRInterviewPanel        = lazy(() => import('../components/interview/HRInterviewPanel'));
+const TechnicalInterviewPanel = lazy(() => import('../components/interview/TechnicalInterviewPanel'));
+const LiveCodingPanel         = lazy(() => import('../components/interview/LiveCodingPanel'));
+
+const PanelLoader = () => (
+  <div className="flex-1 flex items-center justify-center">
+    <div className="w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+  </div>
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const LiveInterview = () => {
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const { search } = useLocation();
-  const type = new URLSearchParams(search).get('type') || 'behavioral';
-  const role = new URLSearchParams(search).get('role') || '';
-  const difficulty = new URLSearchParams(search).get('difficulty') || 'Medium';
+
+  const { id }      = useParams();
+  const navigate    = useNavigate();
+  const { search }  = useLocation();
+  const params      = new URLSearchParams(search);
+  const type        = params.get('type')       || 'behavioral';
+  const role        = params.get('role')       || '';
+  const difficulty  = params.get('difficulty') || 'Intermediate';
+  const tone        = params.get('tone')       || 'professional';
+  const durationSec = parseInt(params.get('duration') || '1800', 10);
 
   const { user } = useAuth();
-  const [session, setSession] = useState(null);
-  const [stream, setStream] = useState(null);
-  const [micEnabled, setMicEnabled] = useState(true);
-  const [videoEnabled, setVideoEnabled] = useState(true);
-  const [questions, setQuestions] = useState([]);
+
+  const renderCount = useRef(0);
+  if (process.env.NODE_ENV === 'development') {
+    renderCount.current++;
+    // Uncomment to measure rerender storm:
+    // console.log('[RENDER] LiveInterview:', renderCount.current);
+  }
+
+  // ── UI state ──────────────────────────────────────────────────────────
+  const [questions,            setQuestions]            = useState([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [transcript, setTranscript] = useState([]);
-  const [currentPartial, setCurrentPartial] = useState('');
-  const [codingScore, setCodingScore] = useState(50); // Base score
-  const [analytics, setAnalytics] = useState({
-    confidence: 85,
-    eyeContact: 'Analyzing...',
-    emotion: 'Analyzing...',
-    clarity: 'High',
-    posture: 'Stable'
+  const [transcript,           setTranscript]           = useState([]);
+  const [currentPartial,       setCurrentPartial]       = useState('');
+  const [codingScore,          setCodingScore]          = useState(50);
+  const [timeLeft,             setTimeLeft]             = useState(durationSec);
+  const [micEnabled,           setMicEnabled]           = useState(true);
+  const [videoEnabled,         setVideoEnabled]         = useState(true);
+  const [webcamAvailable,      setWebcamAvailable]      = useState(false);
+  const [isEnding,             setIsEnding]             = useState(false);
+  const [loading,              setLoading]              = useState(true);
+  const [sttStatus,            setSttStatus]            = useState('Initializing microphone...');
+  const [isSpeaking,           setIsSpeaking]           = useState(false);
+  const [authError,            setAuthError]            = useState(null);
+  const [sttReady,             setSttReady]             = useState(false);
+
+  // audioStream stored in a ref so changing it doesn't re-trigger useSTT's useEffect chain
+  // (setting state causes a rerender which can recreate the STT hook context)
+  const audioStreamRef = useRef(null);
+  const [audioStreamState, setAudioStreamState] = useState(null); // only for passing to useSTT
+
+  // ── Refs ──────────────────────────────────────────────────────────────
+  const videoRef          = useRef(null);
+  const streamRef         = useRef(null);
+  const sessionRef        = useRef(null);
+  const transcriptRef     = useRef([]);
+  const analyticsRef      = useRef({});
+  const analyticsTimerRef = useRef(null);
+  const silenceTimerRef   = useRef(null);
+  const deepgramRef       = useRef(null);
+  const recognitionRef    = useRef(null);
+  const mediaRecorderRef  = useRef(null);
+  const testSTTRef        = useRef(null);
+  const isInitializingRef = useRef(false);
+  const isEndingRef       = useRef(false);
+  const destroyedRef      = useRef(false);
+  const authErrorRef      = useRef(null);
+
+  useEffect(() => { transcriptRef.current = transcript; }, [transcript]);
+
+  const DISABLE_FACE_ANALYTICS = false; // Re-enabled: render storm fixed
+
+  // ── Face analytics (video only) ───────────────────────────────────────
+  useFaceAnalytics(videoRef, analyticsRef, webcamAvailable && !loading && !DISABLE_FACE_ANALYTICS);
+
+  const formatTime = useCallback((s) => {
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, '0')}`;
+  }, []);
+
+  // ── Speech activity (silence detection) ──────────────────────────────
+  const onSpeechActivity = useCallback((isFinal) => {
+    clearTimeout(silenceTimerRef.current);
+    setIsSpeaking(true);
+    silenceTimerRef.current = setTimeout(
+      () => setIsSpeaking(false),
+      isFinal ? 3000 : 5000
+    );
+  }, []);
+
+  // ── STT callbacks ─────────────────────────────────────────────────────
+  const handlePartial = useCallback((text) => {
+    setCurrentPartial(text);
+    onSpeechActivity(false);
+  }, [onSpeechActivity]);
+
+  const handleFinal = useCallback((text) => {
+    setTranscript(prev => {
+      const updated = [...prev, `[Candidate] ${text}`].slice(-200);
+      transcriptRef.current = updated;
+      return updated;
+    });
+    setCurrentPartial('');
+    onSpeechActivity(true);
+    console.log('[STT] Transcript appended:', text);
+  }, [onSpeechActivity]);
+
+  const handleStatusChange = useCallback((status) => {
+    setSttStatus(status);
+  }, []);
+
+  // ── useSTT hook ───────────────────────────────────────────────────────
+  // Pass audioStreamState (stable ref-backed) so useSTT's lifecycle
+  // doesn't re-fire on every parent rerender
+  const sttResult = useSTT({
+    audioStream:    audioStreamState,
+    onPartial:      handlePartial,
+    onFinal:        handleFinal,
+    onStatusChange: handleStatusChange,
+    onSpeechActivity,
+    enabled:        sttReady && !loading,
   });
-  const [timeLeft, setTimeLeft] = useState(1800); // 30 min
-  const [isEnding, setIsEnding] = useState(false);
-  const [loading, setLoading] = useState(true);
 
-  const videoRef = useRef(null);
-  const socketRef = useRef(null);
-  const deepgramRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const streamRef = useRef(null); // stable ref for cleanup (stream state is stale in closure)
+  // Store stopSTT in a ref so teardown/handleEnd don't need it as a dep
+  const stopSTTRef = useRef(null);
+  stopSTTRef.current = sttResult.stopAll;
 
-  // Initialize Session and Stream
+  // ── Analytics persistence ─────────────────────────────────────────────
+  const persistAnalytics = useCallback(async () => {
+    const sid = sessionRef.current?.id;
+    if (!sid) return;
+    try {
+      const snap = analyticsRef.current || {};
+      await api.post(`/interviews/${sid}/analytics`, {
+        eyeContactScore:    snap.eyeContactScore    ?? null,
+        nervousnessScore:   snap.nervousnessScore   ?? null,
+        emotionDetected:    snap.emotionDetected     ?? null,
+        smileFrequency:     snap.smileFrequency      ?? null,
+        attentionStability: snap.attentionStability  ?? null,
+      });
+    } catch (err) { 
+      console.error('[InterviewError] persistAnalytics failed:', err); 
+    }
+  }, []);
+
+  // ── Full teardown ─────────────────────────────────────────────────────
+  const teardown = useCallback(() => {
+    console.log('[INTERVIEW CLEANUP] Starting teardown...');
+    destroyedRef.current = true;
+    clearInterval(analyticsTimerRef.current);
+    clearTimeout(silenceTimerRef.current);
+
+    stopSTTRef.current?.();
+
+    // Video stream (face analytics)
+    const s = streamRef.current;
+    if (s) {
+      s.getTracks().forEach(t => {
+        t.stop();
+        console.log('[INTERVIEW CLEANUP] webcam track stopped:', t.label);
+      });
+      streamRef.current = null;
+    }
+
+    // Audio stream (STT)
+    const a = audioStreamRef.current;
+    if (a) {
+      a.getTracks().forEach(t => {
+        t.stop();
+        console.log('[INTERVIEW CLEANUP] audio track stopped:', t.label);
+      });
+      audioStreamRef.current = null;
+    }
+
+    if (videoRef.current) videoRef.current.srcObject = null;
+
+    try {
+      socketService.disconnect('/interview');
+      console.log('[INTERVIEW CLEANUP] socket disconnected');
+    } catch (err) {
+      console.error('[InterviewError] socket disconnect failed:', err);
+    }
+    console.log('[INTERVIEW CLEANUP] Teardown complete');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // No deps — uses refs only, never needs to be recreated
+
+  // ── Init ──────────────────────────────────────────────────────────────
   useEffect(() => {
+    if (isInitializingRef.current) return;
+    isInitializingRef.current = true;
+    destroyedRef.current = false;
+    authErrorRef.current = null;
+
     const init = async () => {
       try {
+        console.log('[InterviewInit] Starting STT init block...');
         setLoading(true);
-        // 1. Create session in backend
-        // Note: api.js interceptor unwraps response.data, so sessionResponse 
-        // is already { success, message, data } — NOT an Axios response object.
-        const sessionResponse = await api.post('/interviews', {
-          interviewType: type,
-          difficulty: difficulty,
-          role: role || undefined
-        });
 
-        console.log('[InterviewInit] Session API response:', sessionResponse);
-
-        // The interceptor returns { success, data } directly
-        const sessionData = sessionResponse?.data;
-        if (!sessionData || !sessionData.id) {
-          console.error('[InterviewInit] Invalid session data:', sessionResponse);
-          throw new Error('Failed to create interview session on server');
+        // Auth guard
+        if (!user) {
+          authErrorRef.current = 'Not authenticated.';
+          setAuthError('Not authenticated. Please log in again.');
+          setLoading(false);
+          return;
         }
-        setSession(sessionData);
-        console.log('[InterviewInit] Session created:', sessionData.id);
 
-        // 2. Fetch questions
         try {
-          const questionsResponse = await api.post('/interviews/questions', {
-            interviewType: type,
-            difficulty: difficulty,
-            role: role || undefined,
-            count: 5
-          });
-          console.log('[InterviewInit] Questions response:', questionsResponse);
-          const qData = questionsResponse?.data;
-          setQuestions(qData?.questions || []);
-        } catch (qErr) {
-          console.warn('[InterviewInit] Questions fetch failed, using fallback bank:', qErr?.message);
-          if (type === 'coding') {
-            setQuestions([
-              { question: 'Write a function to reverse a string.', topic: 'Strings', difficulty: 'Beginner', expectedPoints: ['O(n) time'] },
-              { question: 'Find the maximum element in an array.', topic: 'Arrays', difficulty: 'Beginner', expectedPoints: ['O(n) runtime'] }
-            ]);
-          } else if (type === 'technical') {
-            setQuestions([
-              { question: 'What is the time complexity of a hash map lookup?', topic: 'Data Structures', expectedPoints: ['O(1) average'] },
-              { question: 'Explain RESTful API principles.', topic: 'API Design', expectedPoints: ['Stateless', 'Client-server'] }
-            ]);
-          } else {
-            setQuestions(['Tell me about yourself.', 'What are your strengths?', 'Describe a conflict you resolved.']);
-          }
+          const { getIdToken } = await import('firebase/auth');
+          const { auth } = await import('../services/firebase');
+          if (auth.currentUser) await getIdToken(auth.currentUser, false);
+          console.log('[AUTH] Token ready ✓');
+        } catch (e) {
+          console.warn('[AUTH] Token pre-flight failed:', e.message);
         }
 
-        // 3. Get Media Stream — NON-FATAL: session continues without camera if denied
-        let mediaStream;
+        // 1. Session
+        const sessionRes = await api.post('/interviews', {
+          interviewType: type, difficulty, role: role || undefined,
+        });
+        const sessionData = sessionRes?.data;
+        if (!sessionData?.id) throw new Error('Failed to create interview session');
+        sessionRef.current = sessionData;
+        console.log('[Interview] Session created:', sessionData.id);
+
+        // 2. Questions
         try {
-          mediaStream = await navigator.mediaDevices.getUserMedia({
-            video: { width: 1280, height: 720 },
-            audio: true
+          const qRes = await api.post('/interviews/questions', {
+            interviewType: type, difficulty, role: role || undefined, count: 5,
           });
-          setStream(mediaStream);
-          streamRef.current = mediaStream;
-          if (videoRef.current) videoRef.current.srcObject = mediaStream;
-        } catch (mediaErr) {
-          console.warn('[InterviewInit] Media access denied, continuing without camera/mic:', mediaErr.name);
-          // Session continues — video feed will just be blank
+          if (!destroyedRef.current) setQuestions(qRes?.data?.questions || getFallbackQuestions(type));
+        } catch (err) {
+          console.error('[InterviewError] Failed to fetch questions:', err);
+          if (!destroyedRef.current) setQuestions(getFallbackQuestions(type));
         }
 
-        // 3.5 Deepgram STT Setup (only if we have a live media stream)
-        if (mediaStream) {
-          try {
-            const dgResponse = await api.get('/interviews/token/deepgram');
-            const deepgramTokenData = dgResponse.data;
-            
-            if (deepgramTokenData && deepgramTokenData.key && deepgramTokenData.key !== 'MOCK_DEEPGRAM_TOKEN') {
-              const ws = new WebSocket(`${deepgramTokenData.url}?punctuate=true&interim_results=true&model=nova-2&language=en`, [
-                'token',
-                deepgramTokenData.key,
-              ]);
-
-              ws.onopen = () => {
-                console.log('[STT] Deepgram connected');
-                const mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
-                
-                mediaRecorder.ondataavailable = (event) => {
-                  if (event.data.size > 0 && ws.readyState === 1) {
-                    ws.send(event.data);
-                  }
-                };
-                
-                mediaRecorder.start(250);
-                mediaRecorderRef.current = mediaRecorder;
-              };
-
-              ws.onmessage = (message) => {
-                const received = JSON.parse(message.data);
-                const transcriptLine = received.channel?.alternatives[0]?.transcript;
-                
-                if (transcriptLine && received.is_final) {
-                  setTranscript(prev => [...prev, `[Candidate] ${transcriptLine}`]);
-                  setCurrentPartial('');
-                } else if (transcriptLine) {
-                  setCurrentPartial(transcriptLine);
-                }
-              };
-
-              ws.onerror = (e) => console.error('[STT] Deepgram WS Error:', e);
-              ws.onclose = () => console.log('[STT] Deepgram WS closed cleanly');
-              deepgramRef.current = ws;
-            } else {
-              console.log('[STT] Running in mock/safe mode without Deepgram API key.');
-            }
-          } catch (err) {
-            console.warn('[STT] Deepgram setup failed. Running without Live Transcription:', err);
+        // 3. VIDEO ONLY stream for face analytics
+        //    Audio is handled exclusively by useSTT to avoid mic conflicts
+        try {
+          console.log('[Media] Requesting video stream (face analytics)...');
+          const videoStream = await navigator.mediaDevices.getUserMedia({
+            video: { width: 1280, height: 720, facingMode: 'user' },
+            audio: false,  // ← CRITICAL: no audio here — Web Speech manages mic
+          });
+          streamRef.current = videoStream;
+          if (!destroyedRef.current) setWebcamAvailable(true);
+          if (videoRef.current) {
+            videoRef.current.srcObject = videoStream;
+            videoRef.current.play().catch(() => {});
           }
-        } else {
-          console.log('[STT] No media stream available — skipping Deepgram STT setup.');
+          console.log('[Media] Video stream active ✓');
+        } catch (camErr) {
+          console.warn('[Media] Camera denied:', camErr.message, '— continuing without webcam');
+          if (!destroyedRef.current) setWebcamAvailable(false);
         }
 
-        // 4. Connect Socket using central service (namespace: /interview)
-        const socket = socketService.getSocket('/interview', {
-          userId: user?.uid || user?.id
-        });
-        socketRef.current = socket;
+        // 4. Separate AUDIO stream for STT (useSTT hook handles this)
+        //    We acquire it here so we control the lifecycle, but pass it to useSTT
+        let audioOnlyStream = null;
+        try {
+          console.log('[STT] Requesting audio-only stream for STT...');
+          audioOnlyStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation:  true,
+              noiseSuppression:  true,
+              autoGainControl:   true,
+            },
+            video: false,
+          });
+          const track = audioOnlyStream.getAudioTracks()[0];
+          console.log('[STT] Audio stream acquired ✓ | track:', track?.label, '| readyState:', track?.readyState);
+          if (!destroyedRef.current) {
+            audioStreamRef.current = audioOnlyStream;
+            setAudioStreamState(audioOnlyStream);
+            setSttReady(true);
+          }
+        } catch (micErr) {
+          console.error('[STT] Mic denied:', micErr.message);
+          setSttStatus('🔴 Mic permission denied — grant in browser settings');
+        }
 
-        socket.emit('interview:start', {
-          interviewId: sessionData.id,
-          userId: user?.uid || user?.id
-        });
+        // 5. Socket
+        try {
+          const sock = socketService.getSocket('/interview', { userId: user?.uid || user?.id });
+          sock.emit('interview:start', { interviewId: sessionData.id, userId: user?.uid || user?.id });
+        } catch (err) { 
+          console.error('[InterviewError] Socket emit failed:', err); 
+        }
 
-        socket.on('interview:live-analytics', (data) => {
-          setAnalytics(prev => ({
-            ...prev,
-            confidence: data.analytics?.nervousnessScore ? 100 - data.analytics.nervousnessScore : prev.confidence,
-            eyeContact: data.analytics?.eyeContactScore > 70 ? 'Excellent' : 'Focus Needed',
-            emotion: data.analytics?.emotionDetected || 'Neutral',
-            posture: data.analytics?.postureScore > 80 ? 'Perfect' : 'Fixed'
-          }));
-        });
-
+        // 6. Analytics heartbeat
+        analyticsTimerRef.current = setInterval(persistAnalytics, 30000);
+        console.log('[Interview] Init complete ✓');
       } catch (err) {
-        const errMsg = err?.response?.data?.error || err?.message || 'Unknown error';
-        console.error('[InterviewInit] Initialization failed:', errMsg, err);
-        alert(`Interview initialization failed: ${errMsg}`);
-        navigate('/app/interviews');
+        const msg    = err?.response?.data?.error || err?.message || 'Unknown error';
+        const status = err?.response?.status;
+        console.error('[Interview] Init failed:', status, msg);
+        if (!destroyedRef.current) {
+          const errMsg = status === 401
+            ? 'Session expired. Please go back and log in again.'
+            : `Initialization failed: ${msg}`;
+          authErrorRef.current = errMsg;
+          setAuthError(errMsg);
+          setLoading(false);
+        }
       } finally {
-        setLoading(false);
+        if (!destroyedRef.current && !authErrorRef.current) setLoading(false);
       }
     };
 
     init();
-
     return () => {
-      // 1. Stop MediaRecorder first (it feeds the WS)
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        try { mediaRecorderRef.current.stop(); } catch(e) { /* already stopped */ }
-        mediaRecorderRef.current = null;
-      }
-
-      // 2. Close Deepgram WebSocket
-      if (deepgramRef.current) {
-        try { deepgramRef.current.close(); } catch(e) { /* already closed */ }
-        deepgramRef.current = null;
-      }
-
-      // 3. Stop all media tracks via stable ref (stream state is stale in closure)
-      const activeStream = streamRef.current;
-      if (activeStream) {
-        activeStream.getTracks().forEach(track => {
-          track.stop();
-          console.log(`[Media] Stopped track: ${track.kind}`);
-        });
-        streamRef.current = null;
-      }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null;
-      }
-
-      // 4. Disconnect socket namespace
-      socketService.disconnect('/interview');
-      console.log('[Cleanup] All interview resources disposed');
+      isInitializingRef.current = false;
+      teardown();
     };
-  }, [type, user, navigate]);
-
-  // Timer
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTimeLeft(prev => (prev > 0 ? prev - 1 : 0));
-    }, 1000);
-    return () => clearInterval(timer);
+  // teardown is now stable (no deps), user/type are stable during a session
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  // ── Timer ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const t = setInterval(() => setTimeLeft(p => (p > 0 ? p - 1 : 0)), 1000);
+    return () => clearInterval(t);
+  }, []);
 
-  const handleEnd = async () => {
-    if (isEnding) return;
+  useEffect(() => {
+    if (timeLeft === 0 && sessionRef.current && !isEndingRef.current) handleEnd();
+  }, [timeLeft]); // eslint-disable-line
+
+  // ── End session ───────────────────────────────────────────────────────
+  // timeLeft stored in a ref so handleEnd doesn't need to change identity every second
+  const timeLeftRef = useRef(durationSec);
+  useEffect(() => { timeLeftRef.current = timeLeft; }, [timeLeft]);
+
+  const handleEnd = useCallback(async () => {
+    if (isEndingRef.current) return;
+    isEndingRef.current = true;
+    setIsEnding(true);
+
+    const sid  = sessionRef.current?.id;
+    const snap = analyticsRef.current || {};
+    const tx   = transcriptRef.current;
+    const tl   = timeLeftRef.current;
+
+    stopSTTRef.current?.();
+
+    const s = streamRef.current;
+    if (s) { s.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+
+    const a = audioStreamRef.current;
+    if (a) { a.getTracks().forEach(t => t.stop()); audioStreamRef.current = null; }
+    setAudioStreamState(null);
+
+    if (videoRef.current) videoRef.current.srcObject = null;
+
+    if (!sid) { navigate('/app/interviews'); return; }
+
     try {
-      setIsEnding(true);
-      if (session) {
-        await api.put(`/interviews/${session.id}/end`, {
-          duration: 1800 - timeLeft,
-          score: Math.round(analytics.confidence * 0.8 + 10),
-          confidenceScore: analytics.confidence,
-          codingScore: type === 'coding' ? codingScore : null,
-          transcript: transcript.join(' ')
-        });
-        navigate(`/app/interviews/report/${session.id}`);
-      } else {
-        navigate('/app/interviews');
-      }
+      await api.post(`/interviews/${sid}/analytics/final`, {
+        eyeContactScore:    snap.eyeContactScore    ?? null,
+        nervousnessScore:   snap.nervousnessScore   ?? null,
+        emotionDetected:    snap.emotionDetected     ?? null,
+        smileFrequency:     snap.smileFrequency      ?? null,
+        attentionStability: snap.attentionStability  ?? null,
+      });
+
+      const totalScore = Math.round(
+        (snap.eyeContactScore    ?? 60) * 0.25 +
+        (snap.attentionStability ?? 60) * 0.25 +
+        codingScore * 0.25 +
+        (snap.confidenceScore    ?? 60) * 0.25
+      );
+
+      await api.put(`/interviews/${sid}/end`, {
+        duration:        durationSec - tl,
+        score:           totalScore,
+        confidenceScore: snap.confidenceScore ?? null,
+        codingScore:     type === 'coding' ? codingScore : null,
+        transcript:      tx.join('\n').slice(0, 5000),
+      });
+
+      navigate('/app/interviews/analytics');
     } catch (err) {
-      console.error('Failed to end interview', err);
+      console.error('[Interview] End session failed:', err.message);
       navigate('/app/interviews');
     }
-  };
+  // codingScore/durationSec/type/navigate are stable for the session lifetime
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codingScore]);
 
-  const nextQuestion = () => {
+  // ── Question navigation ───────────────────────────────────────────────
+  const nextQuestion = useCallback(() => {
+    if (isSpeaking) return;
     if (currentQuestionIndex < questions.length - 1) {
-      const nextIdx = currentQuestionIndex + 1;
-      setCurrentQuestionIndex(nextIdx);
-      const q = questions[nextIdx];
-      const qText = typeof q === 'object' ? q.question : q;
-      setTranscript(prev => {
-        // Cap transcript at 200 entries to prevent unbounded memory growth
-        const next = [...prev, `[AI] ${qText}`];
-        return next.length > 200 ? next.slice(-200) : next;
-      });
+      const next = currentQuestionIndex + 1;
+      setCurrentQuestionIndex(next);
+      const q = questions[next];
+      setTranscript(prev => [...prev, `[AI] ${typeof q === 'object' ? q.question : q}`].slice(-200));
     } else {
       handleEnd();
     }
-  };
+  }, [currentQuestionIndex, questions, handleEnd, isSpeaking]);
 
-  if (loading) {
-    return (
-      <div className="h-screen bg-background flex flex-col items-center justify-center space-y-6">
-        <div className="w-24 h-24 border-4 border-primary/20 border-t-primary rounded-full animate-spin shadow-neon-cyan" />
-        <div className="text-center space-y-2">
-          <h2 className="text-xl font-bold tracking-widest uppercase animate-pulse">Syncing Neural Link</h2>
-          <p className="text-xs text-muted font-mono tracking-wider">Establishing encrypted stream with AI Core...</p>
-        </div>
+  const prevQuestion = useCallback(() => {
+    if (currentQuestionIndex > 0) setCurrentQuestionIndex(i => i - 1);
+  }, [currentQuestionIndex]);
+
+  // ── Manual STT test button ────────────────────────────────────────────
+  const handleTestSTT = useCallback(() => {
+    console.log('[STT-TEST] Manual test triggered');
+    console.log('[STT-TEST] Browser:', navigator.userAgent);
+    
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert('SpeechRecognition not supported in this browser'); return; }
+
+    setSttStatus('🧪 Running STT test...');
+    
+    if (!testSTTRef.current) {
+      const test = new SR();
+      test.continuous     = false;
+      test.interimResults = true;
+      test.lang           = 'en-US';
+      test.onstart        = () => { console.log('[STT-TEST] onstart ✓'); setSttStatus('🧪 Test: speak now...'); };
+      test.onaudiostart   = () => { console.log('[STT-TEST] onaudiostart ✓ — mic capturing'); };
+      test.onspeechstart  = () => { console.log('[STT-TEST] onspeechstart ✓ — speech detected'); };
+      test.onresult       = (e) => {
+        let finalTranscript = '';
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) finalTranscript += e.results[i][0].transcript;
+        }
+        if (finalTranscript) {
+           console.log('[STT-TEST] onresult final:', finalTranscript);
+           setSttStatus(`🧪 Test heard: "${finalTranscript}"`);
+        }
+      };
+      test.onerror        = (e) => { console.error('[STT-TEST] onerror:', e.error); setSttStatus(`🔴 Test error: ${e.error}`); };
+      test.onend          = () => { console.log('[STT-TEST] onend'); setTimeout(() => setSttStatus('🎤 Listening...'), 3000); };
+      testSTTRef.current = test;
+    }
+    
+    try { testSTTRef.current.start(); console.log('[STT-TEST] start() called'); }
+    catch (e) { console.error('[STT-TEST] start() failed:', e.message); }
+  }, []);
+
+  // ── Render: loading ───────────────────────────────────────────────────
+  if (loading) return (
+    <div className="h-screen bg-background flex flex-col items-center justify-center space-y-6">
+      <div className="w-24 h-24 border-4 border-primary/20 border-t-primary rounded-full animate-spin shadow-neon-cyan" />
+      <div className="text-center space-y-2">
+        <h2 className="text-xl font-bold tracking-widest uppercase animate-pulse">Syncing Neural Link</h2>
+        <p className="text-xs text-muted font-mono tracking-wider">Establishing encrypted stream...</p>
       </div>
-    );
-  }
+    </div>
+  );
 
+  // ── Render: auth error ────────────────────────────────────────────────
+  if (authError) return (
+    <div className="h-screen bg-background flex flex-col items-center justify-center space-y-6 text-white p-8">
+      <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+        <PhoneOff className="w-8 h-8 text-red-400" />
+      </div>
+      <div className="text-center space-y-3 max-w-md">
+        <h2 className="text-2xl font-black tracking-tight uppercase">Session Error</h2>
+        <p className="text-sm text-muted font-medium leading-relaxed">{authError}</p>
+      </div>
+      <button
+        onClick={() => navigate('/app/interviews')}
+        className="px-6 py-3 bg-primary text-background font-black text-sm uppercase tracking-widest rounded-xl hover:shadow-neon-cyan transition-all"
+      >
+        Return to Interview Hub
+      </button>
+    </div>
+  );
+
+  // ── Render: main ──────────────────────────────────────────────────────
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden text-white">
-      {/* HUD Header */}
-      <header className="h-16 bg-surface/50 backdrop-blur-xl border-b border-white/5 flex items-center justify-between px-8 z-50">
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-3">
-            <div className="w-2 h-2 rounded-full bg-red-500 animate-ping shadow-[0_0_8px_rgba(239,68,68,0.5)]" />
-            <span className="text-[10px] font-black tracking-[0.3em] uppercase text-red-500">Rec_Active</span>
+      {/* Header */}
+      <header className="h-14 bg-surface/50 backdrop-blur-xl border-b border-white/5 flex items-center justify-between px-8 z-50 flex-shrink-0">
+        <div className="flex items-center gap-5">
+          <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+            <span className="text-[10px] font-black tracking-[0.3em] uppercase text-red-500">Live</span>
           </div>
           <div className="h-4 w-px bg-white/10" />
-          <div className="flex items-center gap-3 text-primary">
-            <Clock className="w-4 h-4 shadow-neon-cyan" />
-            <span className="text-sm font-black font-mono tracking-widest">{formatTime(timeLeft)}</span>
+          <div className="flex items-center gap-2 text-primary">
+            <Clock className="w-4 h-4" />
+            <span className={`text-sm font-black font-mono tracking-widest ${timeLeft < 300 ? 'text-red-400 animate-pulse' : ''}`}>
+              {formatTime(timeLeft)}
+            </span>
           </div>
+          {isSpeaking && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-green-500/10 border border-green-500/20 rounded-lg">
+              <div className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+              <span className="text-[9px] font-black uppercase tracking-widest text-green-400">Speaking</span>
+            </div>
+          )}
         </div>
 
-        <div className="flex items-center gap-6">
-          <div className="flex items-center gap-2 px-4 py-1.5 bg-white/5 rounded-xl border border-white/5">
-            <ShieldCheck className="w-4 h-4 text-green-400" />
-            <span className="text-[10px] font-black uppercase tracking-widest text-green-400/80">Neural Safeguard Active</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 px-3 py-1 bg-white/5 rounded-xl border border-white/5">
+            <ShieldCheck className="w-3.5 h-3.5 text-green-400" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-green-400/80">Neural Safeguard</span>
           </div>
-          {role && (
-            <div className="flex items-center gap-2 px-4 py-1.5 bg-primary/10 rounded-xl border border-primary/20">
-              <span className="text-[10px] font-black uppercase tracking-widest text-primary/80">Target: {role}</span>
-            </div>
-          )}
-          {difficulty && (
-            <div className="flex items-center gap-2 px-4 py-1.5 bg-secondary/10 rounded-xl border border-secondary/20">
-              <span className="text-[10px] font-black uppercase tracking-widest text-secondary/80">Diff: {difficulty}</span>
-            </div>
-          )}
-          <button 
-            onClick={handleEnd}
-            className="flex items-center gap-2 px-4 py-1.5 bg-red-500/10 text-red-400 rounded-xl font-black text-[10px] uppercase tracking-widest border border-red-500/20 hover:bg-red-500/20 hover:shadow-[0_0_15px_rgba(239,68,68,0.2)] transition-all"
+
+          {/* ── STT Test Button ── */}
+          <button
+            onClick={handleTestSTT}
+            title="Test speech recognition — open DevTools Console to see logs"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-[9px] font-black uppercase tracking-widest text-amber-400 hover:bg-amber-500/20 transition-all"
           >
-            <PhoneOff className="w-3.5 h-3.5" /> END SESSION
+            <Mic className="w-3 h-3" />
+            Test Mic
           </button>
-          <button className="p-2 hover:bg-white/5 rounded-full transition-all group">
-            <Settings className="w-5 h-5 text-muted group-hover:text-white" />
+
+          {role && (
+            <div className="px-3 py-1 bg-primary/10 rounded-xl border border-primary/20">
+              <span className="text-[10px] font-black uppercase tracking-widest text-primary/80">{role}</span>
+            </div>
+          )}
+
+          {sttStatus && (
+            <div className={`px-3 py-1 rounded-xl border text-[9px] font-black uppercase tracking-widest truncate max-w-[180px] ${
+              sttStatus.includes('Listening') || sttStatus.includes('Deepgram') || sttStatus.includes('received')
+                ? 'bg-green-500/10 border-green-500/20 text-green-400'
+                : sttStatus.includes('🔴') || sttStatus.includes('denied') || sttStatus.includes('error')
+                ? 'bg-red-500/10 border-red-500/20 text-red-400'
+                : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+            }`}>
+              {sttStatus}
+            </div>
+          )}
+
+          <button
+            onClick={handleEnd}
+            disabled={isEnding}
+            className="flex items-center gap-2 px-4 py-1.5 bg-red-500/10 text-red-400 rounded-xl font-black text-[10px] uppercase tracking-widest border border-red-500/20 hover:bg-red-500/20 transition-all disabled:opacity-50"
+          >
+            <PhoneOff className="w-3.5 h-3.5" />
+            {isEnding ? 'Ending...' : 'End Session'}
           </button>
         </div>
       </header>
 
-      <main className="flex-1 flex p-6 gap-6 overflow-hidden">
-        {/* Left: AI & Transcript */}
-        <div className="flex-1 flex flex-col gap-6 overflow-hidden">
-          {type === 'coding' ? (
-            <LiveCodingWorkspace 
-              interviewId={session?.id} 
-              currentQuestion={questions[currentQuestionIndex]} 
-              onScoreUpdate={setCodingScore} 
-              onNextQuestion={nextQuestion}
-            />
-          ) : (
-            /* AI Interviewer Avatar/Panel */
-            <div className="flex-1 glass-card relative flex flex-col items-center justify-center overflow-hidden group">
-              <div className="absolute inset-0 bg-gradient-to-t from-primary/5 to-transparent -z-10" />
-
-              {/* Pulsing AI Neural Visual */}
-              <div className="relative">
-                <motion.div
-                  animate={{ scale: [1, 1.1, 1], rotate: 360 }}
-                  transition={{ duration: 15, repeat: Infinity, ease: 'linear' }}
-                  className="w-56 h-56 rounded-full border border-primary/20 flex items-center justify-center"
-                >
-                  <div className="w-40 h-40 rounded-full border border-primary/40 flex items-center justify-center">
-                    <div className="w-20 h-20 rounded-full bg-primary/20 blur-2xl animate-pulse" />
-                  </div>
-                </motion.div>
-                <BrainCircuit className="w-14 h-14 text-primary absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 shadow-neon-cyan" />
-
-                {/* Orbital Rings */}
-                <motion.div
-                  animate={{ rotate: -360 }}
-                  transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
-                  className="absolute inset-0 -m-4 border-t-2 border-primary/10 rounded-full"
-                />
-              </div>
-
-              <div className="mt-12 text-center max-w-xl px-12 space-y-4">
-                <span className="text-[10px] font-black uppercase tracking-[0.5em] text-primary/60">Neural Inquiry</span>
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={currentQuestionIndex}
-                    initial={{ opacity: 0, filter: 'blur(10px)', y: 20 }}
-                    animate={{ opacity: 1, filter: 'blur(0px)', y: 0 }}
-                    exit={{ opacity: 0, filter: 'blur(10px)', y: -20 }}
-                    className="flex flex-col items-center"
-                  >
-                    {questions[currentQuestionIndex] && typeof questions[currentQuestionIndex] === 'object' ? (
-                      <div className="space-y-4">
-                        <h2 className="text-2xl font-bold tracking-tight leading-relaxed text-white drop-shadow-2xl">
-                          "{questions[currentQuestionIndex].question}"
-                        </h2>
-                        <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
-                          <span className="px-3 py-1 bg-secondary/10 border border-secondary/20 rounded-lg text-[10px] uppercase font-bold text-secondary tracking-widest shadow-neon-purple">
-                            {questions[currentQuestionIndex].topic}
-                          </span>
-                          {questions[currentQuestionIndex].difficulty && (
-                            <span className="px-3 py-1 bg-white/5 border border-white/10 rounded-lg text-[10px] uppercase font-bold text-muted tracking-widest">
-                              {questions[currentQuestionIndex].difficulty}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ) : (
-                      <h2 className="text-2xl font-bold tracking-tight leading-relaxed text-white drop-shadow-2xl">
-                        "{questions[currentQuestionIndex] || 'Processing neural logic tree...'}"
-                      </h2>
-                    )}
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-
-              <button
-                onClick={nextQuestion}
-                className="absolute bottom-8 right-8 flex items-center gap-3 px-6 py-3 bg-primary text-background rounded-2xl font-black text-xs tracking-widest hover:shadow-neon-cyan transition-all group"
-              >
-                CONTINUE SESSION
-                <ChevronRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </button>
-            </div>
-          )}
-
-          {/* Realtime Transcript */}
-          <div className="h-48 glass-card p-6 overflow-y-auto custom-scrollbar">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2 text-muted">
-                <MessageSquare className="w-4 h-4" />
-                <span className="text-[10px] font-black uppercase tracking-[0.2em]">Live Transcription Stream</span>
-              </div>
-              <div className="flex gap-1">
-                {[1, 2, 3].map(i => <div key={i} className="w-1 h-3 bg-primary/40 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.1}s` }} />)}
-              </div>
-            </div>
-            <div className="space-y-4 pb-8">
-              {transcript.length > 0 ? (
-                transcript.map((line, i) => (
-                  <motion.p
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    key={i}
-                    className={`text-sm font-medium leading-relaxed border-l-2 pl-4 py-1 ${line.startsWith('[AI]') ? 'border-secondary/40 text-secondary' : 'border-primary/40 text-white/90'}`}
-                  >
-                    <span className="text-[10px] uppercase font-black mr-2 opacity-40">T+{formatTime(1800 - timeLeft)}</span>
-                    {line.replace(/^\[(AI|Candidate)\] /, '')}
-                  </motion.p>
-                ))
-              ) : (
-                <div className="flex flex-col items-center justify-center py-8 opacity-30 italic text-sm">
-                  Awaiting vocal input for transcription...
-                </div>
-              )}
-              {currentPartial && (
-                <motion.p
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 0.7 }}
-                  className="text-sm font-medium leading-relaxed border-l-2 border-primary/20 pl-4 py-1 italic text-white/70"
-                >
-                  <span className="text-[10px] uppercase font-black mr-2 opacity-40">Live</span>
-                  {currentPartial}
-                </motion.p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right: Camera & HUD */}
-        <div className="w-96 flex flex-col gap-6">
-          {/* User Camera */}
-          <div className="aspect-video glass-card relative group overflow-hidden border-2 border-white/5">
-            <video
-              ref={videoRef}
-              autoPlay
-              muted
-              playsInline
-              className={`w-full h-full object-cover scale-x-[-1] transition-all duration-700 ${!videoEnabled && 'grayscale blur-xl opacity-30'}`}
-            />
-            {!videoEnabled && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-surface/50 backdrop-blur-sm">
-                <VideoOff className="w-12 h-12 text-muted mb-4" />
-                <p className="text-[10px] font-black uppercase tracking-widest text-muted">Neural Stream Halted</p>
-              </div>
+      {/* Main */}
+      <main className="flex-1 flex p-5 gap-5 overflow-hidden">
+        <div className="flex-1 flex flex-col gap-4 overflow-hidden min-w-0">
+          <Suspense fallback={<PanelLoader />}>
+            {type === 'coding' ? (
+              <LiveCodingPanel
+                interviewId={sessionRef.current?.id}
+                currentQuestion={questions[currentQuestionIndex]}
+                selectedLanguage="python"
+                onScoreUpdate={setCodingScore}
+                onNextQuestion={nextQuestion}
+                questionIndex={currentQuestionIndex}
+                totalQuestions={questions.length}
+              />
+            ) : type === 'behavioral' || type === 'hr' ? (
+              <HRInterviewPanel
+                questions={questions}
+                currentIndex={currentQuestionIndex}
+                onNext={nextQuestion}
+                onPrev={prevQuestion}
+                transcript={transcript}
+                currentPartial={currentPartial}
+                formatTime={formatTime}
+                timeLeft={timeLeft}
+                tone={tone}
+                isSpeaking={isSpeaking}
+              />
+            ) : (
+              <TechnicalInterviewPanel
+                questions={questions}
+                currentIndex={currentQuestionIndex}
+                onNext={nextQuestion}
+                onPrev={prevQuestion}
+                transcript={transcript}
+                currentPartial={currentPartial}
+                formatTime={formatTime}
+                timeLeft={timeLeft}
+                role={role}
+                difficulty={difficulty}
+                isSpeaking={isSpeaking}
+              />
             )}
+          </Suspense>
+        </div>
 
-            {/* Camera Overlay HUD */}
-            <div className="absolute top-4 left-4 flex gap-2">
-              <div className="px-2 py-1 bg-black/60 backdrop-blur-md rounded-lg text-[9px] font-mono border border-white/10 uppercase tracking-tighter">
-                Sbj_01 // <span className="text-primary">{user?.displayName?.split(' ')[0] || 'NEURAL_UNIT'}</span>
-              </div>
-            </div>
+        <Suspense fallback={<PanelLoader />}>
+          <InterviewHUD
+            videoRef={videoRef}
+            streamRef={streamRef}
+            analyticsRef={analyticsRef}
+            micEnabled={micEnabled}
+            videoEnabled={videoEnabled}
+            onToggleMic={() => setMicEnabled(v => !v)}
+            onToggleVideo={() => setVideoEnabled(v => !v)}
+            user={user}
+            webcamAvailable={webcamAvailable}
+            timeLeft={timeLeft}
+            formatTime={formatTime}
+            sttStatus={sttStatus}
+          />
+        </Suspense>
 
-            <div className="absolute top-4 right-4 px-2 py-1 bg-primary/20 backdrop-blur-md rounded-lg text-[9px] font-mono border border-primary/30 uppercase tracking-tighter text-primary">
-              Live // 1080p
-            </div>
-
-            {/* Controls */}
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex items-center gap-4 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:translate-y-0 translate-y-4">
-              <button
-                onClick={() => setMicEnabled(!micEnabled)}
-                className={`p-3.5 rounded-2xl backdrop-blur-2xl border transition-all ${micEnabled ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-red-500/20 border-red-500/40 text-red-400'}`}
-              >
-                {micEnabled ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-              </button>
-              <button
-                onClick={() => setVideoEnabled(!videoEnabled)}
-                className={`p-3.5 rounded-2xl backdrop-blur-2xl border transition-all ${videoEnabled ? 'bg-white/5 border-white/10 hover:bg-white/10' : 'bg-red-500/20 border-red-500/40 text-red-400'}`}
-              >
-                {videoEnabled ? <Video className="w-5 h-5" /> : <VideoOff className="w-5 h-5" />}
-              </button>
-              <button
-                onClick={handleEnd}
-                className="p-3.5 rounded-2xl bg-red-500 text-white border border-red-400/50 hover:bg-red-600 transition-all shadow-[0_0_20px_rgba(239,68,68,0.3)]"
-              >
-                <PhoneOff className="w-5 h-5" />
-              </button>
-            </div>
+        {/* TEMPORARY STT DEBUG PANEL & FALLBACK */}
+        <div className="fixed bottom-4 left-4 z-50 bg-black/95 text-cyan-400 p-4 rounded border border-cyan-500/50 shadow-[0_0_15px_rgba(0,255,255,0.2)] font-mono text-sm w-80">
+          <div className="font-bold border-b border-cyan-800 mb-2 pb-1 flex justify-between">
+            <span>STT DIAGNOSTICS</span>
+            <span className="text-xs opacity-50">v5.debug</span>
           </div>
-
-          {/* Realtime Analytics Dashboard */}
-          <div className="flex-1 glass-card p-6 flex flex-col gap-8 relative overflow-hidden">
-            <div className="absolute bottom-0 right-0 w-32 h-32 bg-primary/5 blur-3xl -z-10 rounded-full" />
-
-            <div>
-              <div className="flex items-center justify-between mb-6">
-                <h4 className="text-[10px] font-black text-muted uppercase tracking-[0.2em]">Biometric Sync</h4>
-                <div className="flex gap-1">
-                  {[1, 2, 3, 4].map(i => <div key={i} className="w-0.5 h-2 bg-primary/30" />)}
-                </div>
-              </div>
-
-              <div className="space-y-8">
-                {/* Confidence Meter */}
-                <div className="space-y-3">
-                  <div className="flex justify-between items-end">
-                    <span className="text-xs font-black uppercase tracking-widest text-muted">Neural Confidence</span>
-                    <span className="text-2xl font-black text-primary drop-shadow-neon-cyan">{Math.round(analytics.confidence)}%</span>
-                  </div>
-                  <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${analytics.confidence}%` }}
-                      className="h-full bg-quantum-gradient shadow-neon-cyan"
-                    />
-                  </div>
-                </div>
-
-                {/* Biometric Status Grid */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="p-4 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-all group">
-                    <Eye className="w-3.5 h-3.5 text-green-400 mb-2 opacity-50 group-hover:opacity-100" />
-                    <p className="text-[9px] text-muted uppercase font-black tracking-tighter mb-1">Eye Contact</p>
-                    <p className="text-sm font-black text-green-400">{analytics.eyeContact}</p>
-                  </div>
-                  <div className="p-4 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-all group">
-                    <Smile className="w-3.5 h-3.5 text-primary mb-2 opacity-50 group-hover:opacity-100" />
-                    <p className="text-[9px] text-muted uppercase font-black tracking-tighter mb-1">Emotion</p>
-                    <p className="text-sm font-black text-primary">{analytics.emotion}</p>
-                  </div>
-                  <div className="p-4 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-all group">
-                    <Activity className="w-3.5 h-3.5 text-secondary mb-2 opacity-50 group-hover:opacity-100" />
-                    <p className="text-[9px] text-muted uppercase font-black tracking-tighter mb-1">Speech Rate</p>
-                    <p className="text-sm font-black text-secondary">{analytics.clarity}</p>
-                  </div>
-                  <div className="p-4 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-all group">
-                    <Zap className="w-3.5 h-3.5 text-amber-400 mb-2 opacity-50 group-hover:opacity-100" />
-                    <p className="text-[9px] text-muted uppercase font-black tracking-tighter mb-1">Posture</p>
-                    <p className="text-sm font-black text-amber-400">{analytics.posture}</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-auto p-5 bg-primary/10 border border-primary/20 rounded-2xl relative group hover:bg-primary/20 transition-all">
-              <div className="absolute -top-2 -left-2 p-1.5 bg-primary rounded-lg shadow-neon-cyan">
-                <BrainCircuit className="w-4 h-4 text-background" />
-              </div>
-              <div className="space-y-1">
-                <p className="text-[9px] font-black text-primary uppercase tracking-[0.2em]">Neural Feedback</p>
-                <p className="text-xs font-bold leading-relaxed text-white/90">"Maintain consistent eye contact while iterating through technical logic."</p>
-              </div>
-            </div>
+          <div className="mb-1">Status: <span className="text-white">{sttStatus}</span></div>
+          <div className="mb-1 truncate">Partial: <span className="text-white">{currentPartial || '<none>'}</span></div>
+          <div className="mb-3">Transcript Lines: <span className="text-white">{transcript.length}</span></div>
+          
+          <div className="border-t border-cyan-800 pt-2">
+            <div className="text-xs mb-1 opacity-80">Fallback Typing Mode (Press Enter)</div>
+            <input 
+              type="text" 
+              className="w-full bg-slate-900 border border-cyan-800 rounded px-2 py-1 text-white text-xs outline-none focus:border-cyan-400"
+              placeholder="Type simulated speech..."
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.target.value.trim()) {
+                  handleFinal(e.target.value);
+                  e.target.value = '';
+                }
+              }}
+            />
           </div>
         </div>
+
       </main>
     </div>
   );
 };
+
+// ─── Fallback question banks ──────────────────────────────────────────────────
+function getFallbackQuestions(type) {
+  const banks = {
+    coding:       [
+      { question: 'Reverse a linked list in O(n) time.', topic: 'Linked Lists', difficulty: 'Intermediate' },
+      { question: 'Find the longest substring without repeating characters.', topic: 'Sliding Window', difficulty: 'Intermediate' },
+      { question: 'Implement a valid parentheses checker.', topic: 'Stacks', difficulty: 'Beginner' },
+    ],
+    technical:    [
+      { question: 'Explain the difference between REST and GraphQL.', topic: 'API Design' },
+      { question: 'What are SOLID principles?', topic: 'Design Patterns' },
+      { question: 'How does a hash table work internally?', topic: 'Data Structures' },
+      { question: 'What is the CAP theorem?', topic: 'Distributed Systems' },
+      { question: 'Explain event loop in Node.js.', topic: 'Runtime' },
+    ],
+    behavioral:   [
+      { question: 'Tell me about yourself and your background.' },
+      { question: 'Describe a challenging project you worked on.' },
+      { question: 'How do you handle disagreements with team members?' },
+      { question: 'Tell me about a time you failed and what you learned.' },
+      { question: 'How do you prioritize work under pressure?' },
+    ],
+    hr:           [
+      { question: 'Why do you want to work at our company?' },
+      { question: 'What motivates you professionally?' },
+      { question: 'Describe your ideal work environment.' },
+      { question: 'Where do you see yourself in 5 years?' },
+      { question: 'What are your salary expectations?' },
+    ],
+    system_design:[
+      { question: 'Design a URL shortener like bit.ly.', topic: 'System Design' },
+      { question: 'How would you design a real-time chat application?', topic: 'Scalability' },
+      { question: 'Design a notification service.', topic: 'Architecture' },
+    ],
+  };
+  return banks[type] || banks.behavioral;
+}
 
 export default LiveInterview;

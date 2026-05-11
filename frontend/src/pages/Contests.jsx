@@ -137,7 +137,7 @@ const Contests = () => {
                 <button 
                   className={`px-8 py-3 text-xs font-black uppercase tracking-[0.2em] ${timeLeft === 'ENDED' ? 'bg-white/5 text-muted cursor-not-allowed border border-white/10' : 'neon-button-cyan'}`}
                   disabled={timeLeft === 'ENDED'}
-                  onClick={() => navigate(`/contests/${filteredContests[0].id}`)}
+                  onClick={() => navigate(`/app/contests/${filteredContests[0].id}`)}
                 >
                   {timeLeft === 'ENDED' ? 'Arena Closed' : 'Enter Arena'}
                 </button>
@@ -202,7 +202,7 @@ const Contests = () => {
                   <div className="w-6 h-6 rounded-full border-2 border-surface bg-white/5 flex items-center justify-center text-[8px] font-black text-muted">+</div>
                 </div>
                 <button 
-                  onClick={() => navigate(`/contests/${contest.id}`)}
+                  onClick={() => navigate(`/app/contests/${contest.id}`)}
                   className="flex items-center gap-2 text-[10px] font-black uppercase text-primary tracking-widest hover:gap-3 transition-all"
                 >
                   Arena Profile <ChevronRight className="w-4 h-4" />

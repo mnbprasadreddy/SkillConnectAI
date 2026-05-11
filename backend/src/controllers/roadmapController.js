@@ -1,32 +1,41 @@
 // ═══════════════════════════════════════════════════════════════
-// SkillConnect AI — Roadmap Controller
+// SkillConnect AI — Roadmap Controller (v2)
 // ═══════════════════════════════════════════════════════════════
 
 const roadmapService = require('../services/roadmapService');
 const { asyncHandler } = require('../utils/helpers');
 const response = require('../utils/apiResponse');
 
+const getTopics = asyncHandler(async (req, res) => {
+  if (!req.user) return response.unauthorized(res);
+  const topics = await roadmapService.getAllTopics(req.user.id);
+  return response.success(res, topics);
+});
+
+const getTopicDetail = asyncHandler(async (req, res) => {
+  if (!req.user) return response.unauthorized(res);
+  const { slug } = req.params;
+  const topic = await roadmapService.getTopicBySlug(slug, req.user.id);
+  if (!topic) return response.notFound(res, 'Roadmap topic');
+  return response.success(res, topic);
+});
+
+const completeModule = asyncHandler(async (req, res) => {
+  if (!req.user) return response.unauthorized(res);
+  const { moduleId, score } = req.body;
+  if (!moduleId) return response.badRequest(res, 'moduleId is required');
+  const result = await roadmapService.completeModule(req.user.id, parseInt(moduleId), score || null);
+  return response.success(res, result, 'Module completed');
+});
+
+// Legacy endpoint — backward compat
 const getRoadmap = asyncHandler(async (req, res) => {
   if (!req.user) return response.unauthorized(res);
-  const roadmap = await roadmapService.getRoadmap(req.user.id);
+  const roadmap = await roadmapService.getLegacyRoadmap(req.user.id);
   return response.success(res, {
     ...roadmap,
     completedTopics: JSON.parse(roadmap.completedTopics || '[]'),
   });
 });
 
-const updateProgress = asyncHandler(async (req, res) => {
-  if (!req.user) return response.unauthorized(res);
-  const { topic } = req.body;
-  if (!topic) return response.badRequest(res, 'Topic is required');
-  const roadmap = await roadmapService.updateProgress(req.user.id, topic);
-  return response.success(res, roadmap, 'Progress updated');
-});
-
-const generateRoadmap = asyncHandler(async (req, res) => {
-  if (!req.user) return response.unauthorized(res);
-  const roadmap = await roadmapService.generateRoadmap(req.user.id);
-  return response.success(res, roadmap, 'Roadmap generated');
-});
-
-module.exports = { getRoadmap, updateProgress, generateRoadmap };
+module.exports = { getTopics, getTopicDetail, completeModule, getRoadmap };

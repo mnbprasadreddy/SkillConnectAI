@@ -74,15 +74,23 @@ const getDefaultHRQuestions = (count) => {
  */
 const getDeepgramToken = async () => {
   const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
-  if (!DEEPGRAM_API_KEY) {
-    logger.warn('DEEPGRAM_API_KEY is missing. Using mock token (STT will fail gracefully in frontend).');
-    return { key: 'MOCK_DEEPGRAM_TOKEN', url: 'wss://mock.deepgram.com' };
+
+  if (!DEEPGRAM_API_KEY || DEEPGRAM_API_KEY.trim().length < 10) {
+    logger.warn('[Deepgram] Token generation skipped — API key missing or too short. Returning mock token.');
+    logger.warn('[Deepgram] Add DEEPGRAM_API_KEY=<your_key> to backend/.env and restart to enable Deepgram STT.');
+    return { key: 'MOCK_DEEPGRAM_TOKEN', url: 'wss://mock.deepgram.com', status: 'mock' };
   }
 
-  // To keep it secure, we ideally create a temporary project key via API.
-  // For Phase 1 simplicity and Render free-tier, we can just pass the key to the authenticated user.
-  // Note: In production, use Deepgram's /v1/projects/{id}/keys to generate a short-lived token.
-  return { key: DEEPGRAM_API_KEY, url: 'wss://api.deepgram.com/v1/listen' };
+  logger.info('[Deepgram] Generating realtime token...');
+
+  // For security, ideally create a short-lived project key via Deepgram's /v1/projects/{id}/keys API.
+  // For Render free-tier Phase 1, we pass the API key securely to the authenticated frontend user.
+  logger.info('[Deepgram] Token generated successfully (direct API key mode)');
+  return {
+    key: DEEPGRAM_API_KEY,
+    url: 'wss://api.deepgram.com/v1/listen',
+    status: 'live',
+  };
 };
 
 /**

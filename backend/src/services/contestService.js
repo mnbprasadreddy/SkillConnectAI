@@ -41,6 +41,7 @@ const createContest = async (data) => {
  */
 const getAllContests = async () => {
   const contests = await prisma.contest.findMany({
+    where: { isArchived: false },
     orderBy: { startTime: 'desc' },
     include: {
       _count: { select: { submissions: true } },

@@ -48,6 +48,7 @@ initializeSocket(server);
 setupSocketHandlers();
 
 const judge0Service = require('./services/judge0Service');
+const seedSuperAdmin = require('./utils/adminSeed');
 
 // Start server
 server.listen(PORT, async () => {
@@ -59,8 +60,24 @@ server.listen(PORT, async () => {
   logger.info(`  Health: http://localhost:${PORT}/api/health`);
   logger.info(`═══════════════════════════════════════════════════`);
 
+  // ── API Key status ─────────────────────────────────────────────
+  const dgKey = process.env.DEEPGRAM_API_KEY;
+  if (dgKey && dgKey.trim().length > 10) {
+    logger.info(`[Deepgram] API Key Loaded: YES ✓ (${dgKey.slice(0,4)}...${dgKey.slice(-4)})`);
+  } else {
+    logger.warn(`[Deepgram] API Key Loaded: NO ✗ — STT will fall back to Web Speech API`);
+    logger.warn(`[Deepgram] Add DEEPGRAM_API_KEY to backend/.env to enable high-quality transcription`);
+  }
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  logger.info(`[Gemini]   API Key Loaded: ${geminiKey && geminiKey.length > 10 ? 'YES ✓' : 'NO ✗'}`);
+  // ──────────────────────────────────────────────────────────────
+
   // Validate Judge0 connection on startup
   await judge0Service.validateConnection();
+
+  // Seed super admin (idempotent, non-fatal)
+  await seedSuperAdmin();
 });
 
 // Fallback error handler (should rarely trigger now)

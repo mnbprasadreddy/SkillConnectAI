@@ -45,6 +45,14 @@ const saveAnalytics = asyncHandler(async (req, res) => {
   return response.success(res, analytics, 'Analytics saved');
 });
 
+// Called ONCE at end of session — saves final biometric snapshot
+const saveFinalAnalytics = asyncHandler(async (req, res) => {
+  if (!req.user) return response.unauthorized(res);
+  const id = parseInt(req.params.id);
+  const analytics = await interviewService.saveFinalAnalytics(id, req.body);
+  return response.success(res, analytics, 'Final analytics saved');
+});
+
 const getQuestions = asyncHandler(async (req, res) => {
   if (!req.user) return response.unauthorized(res);
   const { interviewType, difficulty, count, role } = req.body;
@@ -75,4 +83,4 @@ const getHint = asyncHandler(async (req, res) => {
   return response.success(res, result);
 });
 
-module.exports = { createSession, endSession, getMyInterviews, getInterviewById, saveAnalytics, getQuestions, getDeepgramToken, executeCode, getHint };
+module.exports = { createSession, endSession, getMyInterviews, getInterviewById, saveAnalytics, saveFinalAnalytics, getQuestions, getDeepgramToken, executeCode, getHint };

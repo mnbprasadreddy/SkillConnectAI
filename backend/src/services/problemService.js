@@ -26,7 +26,7 @@ const createProblem = async (data) => {
  * Get all problems with pagination, search, and filters
  */
 const getAllProblems = async ({ page, limit, offset, difficulty, topic, search, userId }) => {
-  const where = {};
+  const where = { isArchived: false };
 
   if (difficulty) where.difficulty = difficulty;
   if (topic) where.topic = topic;
@@ -97,7 +97,7 @@ const getProblemById = async (id, userId) => {
     where: { id },
     include: {
       testCases: {
-        where: { isHidden: false },
+        where: { isHidden: false, isArchived: false },
         select: {
           id: true,
           input: true,
@@ -175,6 +175,7 @@ const deleteProblem = async (id) => {
  */
 const getDistinctTopics = async () => {
   const result = await prisma.problem.findMany({
+    where: { isArchived: false },
     select: { topic: true },
     distinct: ['topic'],
     orderBy: { topic: 'asc' },
@@ -187,7 +188,7 @@ const getDistinctTopics = async () => {
  */
 const getAllTestCases = async (problemId) => {
   return await prisma.testCase.findMany({
-    where: { problemId },
+    where: { problemId, isArchived: false },
     orderBy: { id: 'asc' },
   });
 };

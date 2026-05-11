@@ -5,6 +5,7 @@ import Navbar from '../components/Navbar';
 import { useAuth } from '../context/AuthContext';
 import { Mail, ShieldAlert, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import AICoachButton from '../components/ai-coach/AICoachButton';
 
 const VerificationBanner = () => {
   const { user, resendVerification, checkEmailVerification } = useAuth();
@@ -41,7 +42,7 @@ const VerificationBanner = () => {
   if (!user || user.emailVerified) return null;
 
   return (
-    <div className="bg-primary/10 border-b border-primary/20 backdrop-blur-md px-6 py-3 flex items-center justify-between sticky top-[64px] z-40">
+    <div className="bg-primary/10 border-b border-primary/20 backdrop-blur-md px-6 py-3 flex items-center justify-between sticky top-20 z-40">
       <div className="flex items-center gap-3">
         <div className="p-2 bg-primary/20 rounded-lg">
           <ShieldAlert className="w-4 h-4 text-primary" />
@@ -83,15 +84,20 @@ const DashboardLayout = () => {
       <Sidebar />
       <div className="pl-64">
         <Navbar />
-        <VerificationBanner />
-        <main className="p-8 min-h-screen">
-          <Outlet />
-        </main>
+        <div className="pt-20">
+          <VerificationBanner />
+          <main className="p-8 min-h-screen">
+            <Outlet />
+          </main>
+        </div>
       </div>
       
       {/* Background Glows */}
       <div className="fixed top-0 right-0 w-[500px] h-[500px] bg-primary/5 blur-[150px] -z-10 rounded-full" />
       <div className="fixed bottom-0 left-64 w-[500px] h-[500px] bg-secondary/5 blur-[150px] -z-10 rounded-full" />
+
+      {/* Global AI Coach Button */}
+      <AICoachButton />
     </div>
   );
 };
