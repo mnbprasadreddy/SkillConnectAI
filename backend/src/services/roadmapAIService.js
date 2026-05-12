@@ -9,21 +9,11 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`;
 
-/**
- * Generate a complete roadmap with fully-detailed modules for a given topic.
- * Each module includes theory, examples, code, best practices, and exercises.
- * Content is CONCISE — no essays, no large markdown, only structured JSON.
- *
- * @param {string} topic - e.g. "Arrays", "Dynamic Programming"
- * @param {string} roleTrack - e.g. "Full Stack", "Backend", "AI/ML"
- * @param {string} difficulty - e.g. "Beginner", "Intermediate", "Advanced"
- * @returns {Object} { topic, description, totalModules, modules[] }
- */
 async function generateRoadmap(topic, roleTrack = 'Full Stack', difficulty = 'Beginner') {
-  if (!GEMINI_API_KEY) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
     logger.warn('[RoadmapAI] GEMINI_API_KEY missing — using fallback roadmap');
     return buildFallbackRoadmap(topic, roleTrack, difficulty);
   }
@@ -31,7 +21,7 @@ async function generateRoadmap(topic, roleTrack = 'Full Stack', difficulty = 'Be
   try {
     const prompt = buildPrompt(topic, roleTrack, difficulty);
 
-    const response = await axios.post(`${GEMINI_URL}?key=${GEMINI_API_KEY}`, {
+    const response = await axios.post(`${GEMINI_URL}?key=${apiKey}`, {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.6,

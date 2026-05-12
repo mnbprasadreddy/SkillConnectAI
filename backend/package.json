@@ -12,7 +12,10 @@
     "prisma:studio": "npx prisma studio",
     "prisma:seed": "node prisma/seed.js",
     "seed:advanced-problems": "node prisma/advancedProblemSeeder.js",
-    "seed:contest": "node prisma/contestSeeder.js"
+    "seed:contest": "node prisma/contestSeeder.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage"
   },
   "keywords": [
     "skillconnect",
@@ -41,6 +44,8 @@
   "devDependencies": {
     "nodemon": "^3.1.9",
     "prisma": "^6.9.0",
-    "prisma-dbml-generator": "^0.12.0"
+    "prisma-dbml-generator": "^0.12.0",
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
   }
 }
