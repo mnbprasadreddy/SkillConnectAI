@@ -147,6 +147,10 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
+// ─── Static Files ──────────────────────────────────────────────
+const path = require('path');
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 // ─── API Routes ────────────────────────────────────────────────
 app.use('/api/users', userRoutes);
 app.use('/api/problems', problemRoutes);
@@ -160,6 +164,7 @@ app.use('/api/roadmap', roadmapRoutes);
 app.use('/api/materials', materialRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/ai-coach', aiCoachRoutes);
+app.use('/api/replays', require('./routes/replayRoutes'));
 
 // ─── Error Handling ────────────────────────────────────────────
 app.use(notFoundHandler);

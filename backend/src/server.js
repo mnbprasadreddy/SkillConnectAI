@@ -9,6 +9,7 @@ const http = require('http');
 const app = require('./app');
 const { initializeSocket } = require('./config/socket');
 const { setupSocketHandlers } = require('./socket/socketManager');
+const { startCleanupJob } = require('./jobs/replayCleanupJob');
 const logger = require('./utils/logger');
 
 const PORT = process.env.PORT || 5000;
@@ -19,6 +20,9 @@ const server = http.createServer(app);
 // Initialize Socket.IO
 initializeSocket(server);
 setupSocketHandlers();
+
+// Start background jobs
+startCleanupJob();
 
 const judge0Service = require('./services/judge0Service');
 const seedSuperAdmin = require('./utils/adminSeed');

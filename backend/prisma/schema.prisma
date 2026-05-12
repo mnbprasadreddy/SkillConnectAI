@@ -25,6 +25,7 @@ model User {
   recommendations    Recommendation[]
   submissions        Submission[]
   weakTopics         WeakTopic[]
+  replays            InterviewReplay[]
 
   @@map("users")
 }
@@ -99,6 +100,7 @@ model Interview {
   analytics          InterviewAnalytic?
   user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   report             Report?
+  replay             InterviewReplay?
 
   @@map("interviews")
 }
@@ -123,6 +125,23 @@ model InterviewAnalytic {
   interview           Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
 
   @@map("interview_analytics")
+}
+
+model InterviewReplay {
+  id            Int       @id @default(autoincrement())
+  interviewId   Int       @unique @map("interview_id")
+  userId        Int       @map("user_id")
+
+  videoUrl      String?   @map("video_url")
+  duration      Int?
+  size          Int?
+
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  interview     Interview @relation(fields: [interviewId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("interview_replays")
 }
 
 model Report {

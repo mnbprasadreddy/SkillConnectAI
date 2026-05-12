@@ -51,7 +51,61 @@ const deleteFile = async (fileUrl) => {
   }
 };
 
+// ─── REPLAY STORAGE ABSTRACTION ──────────────────────────────
+
+const fs = require('fs');
+const path = require('path');
+const REPLAY_UPLOAD_DIR = path.join(__dirname, '../../uploads/interviews');
+
+// Ensure directory exists
+if (!fs.existsSync(REPLAY_UPLOAD_DIR)) {
+  fs.mkdirSync(REPLAY_UPLOAD_DIR, { recursive: true });
+}
+
+/**
+ * Save replay buffer/file locally
+ */
+const saveReplay = async (buffer, filename) => {
+  try {
+    const uniqueName = `${uuidv4()}_${filename}`;
+    const filePath = path.join(REPLAY_UPLOAD_DIR, uniqueName);
+    fs.writeFileSync(filePath, buffer);
+    return uniqueName;
+  } catch (error) {
+    logger.error('saveReplay failed:', error.message);
+    throw error;
+  }
+};
+
+/**
+ * Delete a local replay file
+ */
+const deleteReplay = async (filename) => {
+  try {
+    const filePath = path.join(REPLAY_UPLOAD_DIR, filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    logger.warn('deleteReplay failed:', error.message);
+    return false;
+  }
+};
+
+/**
+ * Get public URL for a replay
+ */
+const getReplayUrl = (req, filename) => {
+  const host = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+  return `${host}/uploads/interviews/${filename}`;
+};
+
 module.exports = {
   uploadBuffer,
   deleteFile,
+  saveReplay,
+  deleteReplay,
+  getReplayUrl,
 };

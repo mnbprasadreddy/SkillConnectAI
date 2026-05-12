@@ -83,6 +83,7 @@ const LiveInterview = () => {
   const deepgramRef       = useRef(null);
   const recognitionRef    = useRef(null);
   const mediaRecorderRef  = useRef(null);
+  const replayChunksRef   = useRef([]);
   const testSTTRef        = useRef(null);
   const isInitializingRef = useRef(false);
   const isEndingRef       = useRef(false);
@@ -198,6 +199,11 @@ const LiveInterview = () => {
 
     if (videoRef.current) videoRef.current.srcObject = null;
 
+    // Stop replay recording
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try { mediaRecorderRef.current.stop(); } catch (e) {}
+    }
+
     try {
       socketService.disconnect('/interview');
       console.log('[INTERVIEW CLEANUP] socket disconnected');
@@ -302,6 +308,31 @@ const LiveInterview = () => {
           setSttStatus('🔴 Mic permission denied — grant in browser settings');
         }
 
+        // 4.5. Start Replay Recording (combining streams)
+        if (streamRef.current && audioStreamRef.current) {
+          try {
+            const combinedStream = new MediaStream([
+              ...streamRef.current.getVideoTracks(),
+              ...audioStreamRef.current.getAudioTracks()
+            ]);
+            let options = { mimeType: 'video/webm' };
+            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+              options = { mimeType: 'video/mp4' };
+            }
+            const recorder = new MediaRecorder(combinedStream, options);
+            recorder.ondataavailable = (e) => {
+              if (e.data && e.data.size > 0) {
+                replayChunksRef.current.push(e.data);
+              }
+            };
+            recorder.start(3000); // Chunk every 3 seconds
+            mediaRecorderRef.current = recorder;
+            console.log('[Media] Replay recording started ✓');
+          } catch (recordErr) {
+            console.error('[Media] Replay recording failed to start:', recordErr);
+          }
+        }
+
         // 5. Socket
         try {
           const sock = socketService.getSocket('/interview', { userId: user?.uid || user?.id });
@@ -376,6 +407,25 @@ const LiveInterview = () => {
     if (videoRef.current) videoRef.current.srcObject = null;
 
     if (!sid) { navigate('/app/interviews'); return; }
+
+    // Upload Replay Logic
+    try {
+      if (replayChunksRef.current.length > 0) {
+        const blob = new Blob(replayChunksRef.current, { type: replayChunksRef.current[0].type });
+        const formData = new FormData();
+        formData.append('video', blob, `interview_${sid}.webm`);
+        formData.append('interviewId', sid);
+        formData.append('duration', durationSec - tl);
+        
+        console.log(`[Replay] Uploading ${blob.size} bytes...`);
+        // Do not await to avoid blocking end screen transition
+        api.post('/replays/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        }).catch(err => console.error('[ReplayUploadError]', err));
+      }
+    } catch (uploadErr) {
+      console.error('[Replay] Upload preparation failed:', uploadErr);
+    }
 
     try {
       await api.post(`/interviews/${sid}/analytics/final`, {
