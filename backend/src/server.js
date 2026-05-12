@@ -6,39 +6,12 @@
 require('dotenv').config();
 
 const http = require('http');
-const { execSync } = require('child_process');
 const app = require('./app');
 const { initializeSocket } = require('./config/socket');
 const { setupSocketHandlers } = require('./socket/socketManager');
 const logger = require('./utils/logger');
 
 const PORT = process.env.PORT || 5000;
-
-// ── Auto-free the port before binding ────────────────────────────
-// This prevents EADDRINUSE on every restart without any manual steps.
-function freePort(port) {
-  try {
-    const pids = execSync(
-      `powershell -Command "(Get-NetTCPConnection -LocalPort ${port} -ErrorAction SilentlyContinue).OwningProcess"`,
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }
-    ).trim();
-
-    if (pids) {
-      const pidList = [...new Set(pids.split(/\r?\n/).filter(Boolean))];
-      pidList.forEach(pid => {
-        try {
-          execSync(`powershell -Command "Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue"`, { stdio: 'ignore' });
-        } catch (_) {}
-      });
-      logger.info(`🧹 Auto-cleared port ${port} (killed PID: ${pidList.join(', ')})`);
-    }
-  } catch (_) {
-    // Port is already free — nothing to do
-  }
-}
-
-// Run the auto-clear before creating the server
-freePort(PORT);
 
 // Create HTTP server
 const server = http.createServer(app);

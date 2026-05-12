@@ -47,6 +47,7 @@ export function useSTT({
   onStatusChange,
   onSpeechActivity,
   enabled = false,
+  interviewId = null,
 }) {
   // Engine refs
   const recognitionRef   = useRef(null);
@@ -138,8 +139,10 @@ export function useSTT({
     activeStreamRef.current = null;
 
     clearInterval(micIntervalRef.current);
+    clearInterval(whisperIntervalRef.current);
     clearTimeout(restartTimerRef.current);
     micIntervalRef.current  = null;
+    whisperIntervalRef.current = null;
     restartTimerRef.current = null;
 
     try { audioCtxRef.current?.close(); } catch {}
@@ -320,19 +323,105 @@ export function useSTT({
     }
   };
 
-  // ── Deepgram ───────────────────────────────────────────────────────────
+  // ── Whisper (Primary) ──────────────────────────────────────────────────
+  const whisperBufferRef = useRef([]);
+  const whisperIntervalRef = useRef(null);
+
+  const startWhisperRef = useRef(null);
+  startWhisperRef.current = async (stream) => {
+    if (destroyedRef.current) return false;
+
+    try {
+      const mime = getSupportedMimeType();
+      logSTT('Whisper (Primary) starting...', { mime });
+
+      const mr = mime
+        ? new MediaRecorder(stream, { mimeType: mime })
+        : new MediaRecorder(stream);
+
+      mr.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          whisperBufferRef.current.push(e.data);
+        }
+      };
+
+      mr.onerror = (err) => logSTT('Whisper MediaRecorder error:', err.message);
+
+      // We collect data in small intervals but process/send in larger ones
+      mr.start(500);
+      mediaRecorderRef.current = mr;
+
+      // Transcription loop
+      const sendToWhisper = async () => {
+        if (destroyedRef.current || whisperBufferRef.current.length === 0) return;
+
+        const blob = new Blob(whisperBufferRef.current, { type: mr.mimeType });
+        whisperBufferRef.current = []; // Clear buffer immediately to avoid duplicates
+
+        try {
+          const reader = new FileReader();
+          reader.readAsDataURL(blob);
+          reader.onloadend = async () => {
+            const base64data = reader.result.split(',')[1];
+            if (!base64data) return;
+
+            try {
+              setStatus('⏳ Transcribing (Whisper)...');
+              const res = await api.post('/interviews/transcribe', {
+                audio_base64: base64data,
+                sample_rate: 16000,
+                interviewId: interviewId
+              });
+
+              if (res.data?.success && res.data.data?.transcript) {
+                const text = res.data.data.transcript;
+                logSTT('Whisper Transcript:', text);
+                onFinalRef.current?.(text);
+                onSpeechActivityRef.current?.(true);
+                setStatus('📝 Transcript received');
+                setTimeout(() => {
+                  if (!destroyedRef.current && engineRef.current === 'whisper') {
+                    setStatus('🟢 Whisper listening...');
+                  }
+                }, 1000);
+              }
+            } catch (err) {
+              logSTT('Whisper transcription request failed:', err.message);
+              // Fallback logic handled by the main startRef if this loop breaks
+            }
+          };
+        } catch (err) {
+          logSTT('Blob to base64 conversion failed:', err.message);
+        }
+      };
+
+      // Send every 4 seconds for a balance of latency and overhead
+      whisperIntervalRef.current = setInterval(sendToWhisper, 4000);
+
+      engineRef.current = 'whisper';
+      startedRef.current = true;
+      setStatus('🟢 Whisper listening...');
+      return true;
+
+    } catch (err) {
+      logSTT('startWhisper threw:', err.message);
+      return false;
+    }
+  };
+
+  // ── Deepgram (Fallback) ────────────────────────────────────────────────
   // Also ref-based — no useCallback dep chain
   const startDeepgramRef = useRef(null);
   startDeepgramRef.current = async (stream) => {
     if (destroyedRef.current) return false;
 
     try {
-      logSTT('Fetching Deepgram token...');
+      logSTT('Fetching Deepgram token (Fallback Mode)...');
       const res    = await api.get('/interviews/token/deepgram');
       const dgData = res?.data;
 
       if (!dgData?.key || dgData.key === 'MOCK_DEEPGRAM_TOKEN' || dgData.key.length < 20) {
-        logSTT('Invalid or mock Deepgram token — skipping', { key: dgData?.key?.substring(0, 8) });
+        logSTT('Invalid or mock Deepgram token — skipping fallback', { key: dgData?.key?.substring(0, 8) });
         return false;
       }
 
@@ -340,11 +429,8 @@ export function useSTT({
 
       logSTT('Deepgram token received ✓');
       const mime = getSupportedMimeType();
-      logSTT('MediaRecorder mimeType selected:', mime || 'browser default');
-
       const wsUrl = `${dgData.url}?punctuate=true&interim_results=true&model=nova-2&language=en-US&endpointing=300`;
-      logSTT('Connecting to Deepgram WS:', wsUrl.split('?')[0]);
-
+      
       const ws = new WebSocket(wsUrl, ['token', dgData.key]);
 
       ws.onmessage = (msg) => {
@@ -352,43 +438,29 @@ export function useSTT({
           const data = JSON.parse(msg.data);
           if (data.type === 'Results') {
             const text = data.channel?.alternatives?.[0]?.transcript;
-            logSTT('RAW Deepgram message', { type: data.type, is_final: data.is_final, text });
             if (!text?.trim()) return;
 
             if (data.is_final) {
-              logSTT('FINAL Deepgram transcript:', text);
               onFinalRef.current?.(text.trim());
               onSpeechActivityRef.current?.(true);
               setStatus('📝 Transcript received');
-              setTimeout(() => {
-                if (!destroyedRef.current) setStatus('🟢 Deepgram listening...');
-              }, 1500);
             } else {
               onPartialRef.current?.(text);
               onSpeechActivityRef.current?.(false);
               setStatus('🗣 Speech Detected');
             }
-          } else if (data.type === 'Metadata') {
-            logSTT('Deepgram metadata:', data);
-          } else if (data.error) {
-            logSTT('Deepgram ERROR message:', data.error);
           }
         } catch (err) {
           logSTT('WS message parse error:', err.message);
         }
       };
 
-      ws.onerror = () => {
-        logSTT('Deepgram WS onerror');
-      };
-
       ws.onclose = (e) => {
-        logSTT('Deepgram WS closed', { code: e.code, reason: e.reason });
+        logSTT('Deepgram WS closed', { code: e.code });
         startedRef.current = false;
         deepgramWsRef.current = null;
         if (!destroyedRef.current) {
           setStatus('⚠️ Deepgram disconnected — falling back to browser STT');
-          // FIX: call via ref, not captured closure
           setTimeout(() => {
             if (!destroyedRef.current) startWebSpeechRef.current?.();
           }, 500);
@@ -396,50 +468,28 @@ export function useSTT({
       };
 
       const connected = await new Promise((resolve) => {
-        const timeout = setTimeout(() => {
-          logSTT('Deepgram WS open timeout (8s)');
-          resolve(false);
-        }, 8000);
-
+        const timeout = setTimeout(() => resolve(false), 8000);
         ws.onopen = () => {
           clearTimeout(timeout);
-          logSTT('Deepgram WS OPEN ✓');
-
           try {
-            const mr = mime
-              ? new MediaRecorder(stream, { mimeType: mime })
-              : new MediaRecorder(stream);
-
+            const mr = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
             mr.ondataavailable = (e) => {
-              if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-                ws.send(e.data);
-                logSTT('Audio chunk sent', { bytes: e.data.size });
-              }
+              if (e.data.size > 0 && ws.readyState === WebSocket.OPEN) ws.send(e.data);
             };
-
-            mr.onerror = (err) => logSTT('MediaRecorder error:', err.message);
             mr.start(250);
             mediaRecorderRef.current = mr;
-            logSTT('MediaRecorder started ✓', { mimeType: mr.mimeType, state: mr.state });
             resolve(true);
           } catch (err) {
-            logSTT('MediaRecorder init failed:', err.message);
             resolve(false);
           }
         };
-
-        // Override onerror temporarily to resolve false
-        const prevOnError = ws.onerror;
-        ws.onerror = (e) => {
+        ws.onerror = () => {
           clearTimeout(timeout);
-          logSTT('Deepgram WS connection error');
-          prevOnError?.(e);
           resolve(false);
         };
       });
 
       if (!connected) {
-        logSTT('Deepgram connection failed — will fallback to Web Speech');
         try { ws.close(); } catch {}
         return false;
       }
@@ -456,7 +506,7 @@ export function useSTT({
     }
   };
 
-  // ── Entry point (also ref-based) ───────────────────────────────────────
+  // ── Entry point ────────────────────────────────────────────────────────
   const startRef = useRef(null);
   startRef.current = async (stream) => {
     destroyedRef.current    = false;
@@ -465,85 +515,63 @@ export function useSTT({
     logSTT('=== STT start() ===');
 
     const audioTracks = stream?.getAudioTracks() || [];
-    logSTT(`Audio tracks: ${audioTracks.length}`,
-      audioTracks.map(t => ({ label: t.label, readyState: t.readyState })));
-
-    // Start energy monitor (read-only — never stops tracks)
     if (audioTracks.length > 0) {
       monitorMicEnergyRef.current?.(stream);
     }
 
-    // Try Deepgram first (stream tracks intact)
+    // 1. Try Whisper (Primary)
     if (audioTracks.length > 0 && audioTracks[0].readyState === 'live') {
-      const dgOk = await startDeepgramRef.current(stream);
-      if (dgOk) {
-        logSTT('Using Deepgram engine ✓');
-        return;
-      }
-      logSTT('Deepgram failed — falling back to Web Speech');
-    } else {
-      logSTT('No live audio tracks — falling back to Web Speech directly');
+      const whisperOk = await startWhisperRef.current(stream);
+      if (whisperOk) return;
+      
+      logSTT('Whisper failed — falling back to Deepgram');
     }
 
-    // FIX: Do NOT stop audio tracks here. Web Speech API manages mic independently.
-    // Stopping the stream here would permanently kill the getUserMedia-acquired stream
-    // and Web Speech would also fail with audio-capture errors on some browsers.
-    // Web Speech uses its own internal mic acquisition — no stream needed.
+    // 2. Try Deepgram (Secondary)
+    if (audioTracks.length > 0 && audioTracks[0].readyState === 'live') {
+      const dgOk = await startDeepgramRef.current(stream);
+      if (dgOk) return;
+
+      logSTT('Deepgram failed — falling back to Web Speech');
+    }
+
+    // 3. Last resort: Web Speech
     startWebSpeechRef.current?.();
   };
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
-  // Only depends on [enabled, audioStream] — no function deps that could change
   useEffect(() => {
     logSTT(`Lifecycle: enabled=${enabled}, hasStream=${!!audioStream}`);
 
-    if (!enabled) return;
+    if (!enabled) {
+      stopAllRef.current?.();
+      return;
+    }
 
-    // ── No stream path: fall directly to Web Speech ────────────────────
-    // This handles the case where getUserMedia was denied or unavailable.
-    // Web Speech manages its own mic internally — no stream needed.
     if (!audioStream) {
       if (!startedRef.current) {
-        logSTT('No audio stream — attempting Web Speech directly (no energy monitor)');
-        destroyedRef.current    = false;
-        restartCountRef.current = 0;
+        logSTT('No audio stream — falling back to Web Speech');
         startWebSpeechRef.current?.();
       }
-      return () => {
-        logSTT('useSTT cleanup (no-stream path) — calling stopAll');
-        stopAllRef.current?.();
-      };
+      return () => stopAllRef.current?.();
     }
 
-    // ── Stream available path ──────────────────────────────────────────
-    // Skip if exact same stream is already active and running
     if (activeStreamRef.current === audioStream && startedRef.current) {
-      logSTT('Same stream already active — skipping duplicate start');
       return;
     }
 
-    // New stream while already running — stop current engine, restart
     if (startedRef.current) {
-      logSTT('New stream detected — stopping current engine before restart');
       stopAllRef.current?.();
       setTimeout(() => {
-        if (!destroyedRef.current || activeStreamRef.current !== audioStream) {
-          destroyedRef.current = false;
-          logSTT('Starting STT engine with new stream...');
-          startRef.current?.(audioStream);
-        }
-      }, 200);
+        if (!destroyedRef.current) startRef.current?.(audioStream);
+      }, 300);
       return;
     }
 
-    logSTT('Starting STT engine with stream...');
     startRef.current?.(audioStream);
 
-    return () => {
-      logSTT('useSTT cleanup — calling stopAll');
-      stopAllRef.current?.();
-    };
-  }, [enabled, audioStream]); // ← intentionally minimal: no function deps
+    return () => stopAllRef.current?.();
+  }, [enabled, audioStream]);
 
   return { stopAll, engine: engineRef };
 }

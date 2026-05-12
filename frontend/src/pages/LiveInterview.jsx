@@ -142,6 +142,7 @@ const LiveInterview = () => {
     onStatusChange: handleStatusChange,
     onSpeechActivity,
     enabled:        sttReady && !loading,
+    interviewId:    sessionRef.current?.id,
   });
 
   // Store stopSTT in a ref so teardown/handleEnd don't need it as a dep

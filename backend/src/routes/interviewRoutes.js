@@ -38,6 +38,7 @@ router.get('/:id', verifyToken, interviewIdValidator, handleValidationErrors, ct
 router.post('/:id/analytics', verifyToken, ctrl.saveAnalytics);
 router.post('/:id/analytics/final', verifyToken, ctrl.saveFinalAnalytics);
 router.post('/questions', verifyToken, ctrl.getQuestions);
+router.post('/transcribe', verifyToken, ctrl.transcribeAudio);
 router.post('/:id/execute', verifyToken, ctrl.executeCode);
 router.post('/:id/hint', verifyToken, ctrl.getHint);
 

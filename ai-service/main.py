@@ -27,15 +27,24 @@ app = FastAPI(
 )
 
 # ─── CORS ───────────────────────────────────────────────────────
+# Default to common local development URLs if not specified
+raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://localhost:5000")
+allow_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # ─── Health Check ───────────────────────────────────────────────
+@app.on_event("startup")
+async def startup_event():
+    from voice_analysis.service import get_whisper_model
+    get_whisper_model()
+
 @app.get("/")
 async def root():
     return {

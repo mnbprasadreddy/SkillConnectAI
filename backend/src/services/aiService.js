@@ -264,10 +264,30 @@ Return ONLY valid JSON. Format:
   }
 };
 
+/**
+ * Proxy transcription request to Python AI service (Whisper pipeline).
+ */
+const transcribeAudio = async (audioBase64, sampleRate = 16000) => {
+  const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:8000';
+  
+  try {
+    const response = await axios.post(`${AI_SERVICE_URL}/api/ai/voice/transcribe`, {
+      audio_base64: audioBase64,
+      sample_rate: sampleRate
+    }, { timeout: 15000 });
+
+    return response.data;
+  } catch (error) {
+    logger.error('[Whisper] AI Service transcription failed:', error.message);
+    throw error;
+  }
+};
+
 module.exports = {
   generateHRQuestions,
   getDeepgramToken,
   generateTechnicalQuestions,
   generateCodingQuestions,
-  analyzeCode
+  analyzeCode,
+  transcribeAudio
 };

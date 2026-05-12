@@ -6,7 +6,15 @@ node_modules/
 
 *.log
 
+
 dist/
 coverage/
 
 .prisma/
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+coverage/
+dist/

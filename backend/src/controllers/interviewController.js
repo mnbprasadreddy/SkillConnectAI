@@ -83,4 +83,34 @@ const getHint = asyncHandler(async (req, res) => {
   return response.success(res, result);
 });
 
-module.exports = { createSession, endSession, getMyInterviews, getInterviewById, saveAnalytics, saveFinalAnalytics, getQuestions, getDeepgramToken, executeCode, getHint };
+const transcribeAudio = asyncHandler(async (req, res) => {
+  const { audio_base64, sample_rate, interviewId } = req.body;
+  const aiService = require('../services/aiService');
+  const result = await aiService.transcribeAudio(audio_base64, sample_rate);
+
+  // If transcription succeeded and we have a session ID, save analytics in the background
+  if (result && !result.error && interviewId) {
+    const interviewService = require('../services/interviewService');
+    interviewService.saveAnalytics(parseInt(interviewId), {
+      speakingPaceWpm: result.wpm,
+      fillerWordCount: result.filler_count,
+      speechClarity:   result.confidence, // Use confidence as a proxy for clarity
+    }).catch(err => logger.warn(`[Whisper] Background analytics save failed: ${err.message}`));
+  }
+
+  return response.success(res, result);
+});
+
+module.exports = { 
+  createSession, 
+  endSession, 
+  getMyInterviews, 
+  getInterviewById, 
+  saveAnalytics, 
+  saveFinalAnalytics, 
+  getQuestions, 
+  getDeepgramToken, 
+  executeCode, 
+  getHint,
+  transcribeAudio
+};

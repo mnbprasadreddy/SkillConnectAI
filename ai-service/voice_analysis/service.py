@@ -12,6 +12,23 @@ from utils.config import WHISPER_MODEL
 
 logger = logging.getLogger(__name__)
 
+# ── Load Whisper Model once at startup ───────────────────────
+_whisper_model = None
+
+def get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        try:
+            import whisper
+            logger.info(f"Loading Whisper model: {WHISPER_MODEL}...")
+            _whisper_model = whisper.load_model(WHISPER_MODEL)
+            logger.info("Whisper model loaded successfully.")
+        except ImportError:
+            logger.error("Whisper library not found.")
+        except Exception as e:
+            logger.error(f"Failed to load Whisper model: {str(e)}")
+    return _whisper_model
+
 # Comprehensive filler words list
 FILLER_WORDS = [
     "um", "uh", "like", "you know", "basically", "actually",
@@ -29,9 +46,9 @@ def analyze_voice(audio_array: np.ndarray, sample_rate: int = 16000) -> Dict[str
     segments = []
     
     try:
-        import whisper
-        # Load model with caching logic if possible (handled by whisper lib)
-        model = whisper.load_model(WHISPER_MODEL)
+        model = get_whisper_model()
+        if not model:
+            return {"transcript": "", "error": "Whisper model not loaded"}
 
         # Pre-process audio: ensure float32 and normalized
         audio_float = audio_array.astype(np.float32)
@@ -117,3 +134,59 @@ def analyze_voice(audio_array: np.ndarray, sample_rate: int = 16000) -> Dict[str
         "clarity_score": round(clarity_score, 1),
         "feedback": feedback
     }
+
+
+def transcribe_audio(audio_array: np.ndarray, sample_rate: int = 16000) -> Dict[str, Any]:
+    """
+    Lightweight transcription for live streaming.
+    Returns only transcript and basic metadata (duration, confidence).
+    """
+    try:
+        model = get_whisper_model()
+        if not model:
+            return {"transcript": "", "error": "Whisper model not loaded"}
+
+        # Pre-process audio
+        audio_float = audio_array.astype(np.float32)
+        if audio_float.max() > 1.0:
+            audio_float = audio_float / 32768.0
+
+        # Transcribe (faster settings for live)
+        result = model.transcribe(audio_float, fp16=False, task="transcribe")
+        
+        # Calculate confidence from average logprob of segments
+        segments = result.get("segments", [])
+        avg_logprob = 0
+        if segments:
+            avg_logprob = sum(s.get("avg_logprob", 0) for s in segments) / len(segments)
+        
+        # Map logprob to 0-100 confidence (very rough approximation)
+        confidence = clamp(100 + (avg_logprob * 20))
+
+        transcript = result.get("text", "").strip()
+        words = transcript.split()
+        word_count = len(words)
+        duration_seconds = len(audio_array) / sample_rate
+        
+        # WPM for this chunk
+        wpm = (word_count / max(duration_seconds, 1)) * 60
+
+        # Filler words in this chunk
+        transcript_lower = transcript.lower()
+        filler_count = 0
+        for filler in FILLER_WORDS:
+            matches = re.findall(r'\b' + re.escape(filler) + r'\b', transcript_lower)
+            filler_count += len(matches)
+
+        return {
+            "transcript": transcript,
+            "confidence": round(confidence, 1),
+            "duration": round(duration_seconds, 2),
+            "word_count": word_count,
+            "wpm": round(wpm, 1),
+            "filler_count": filler_count,
+            "language": result.get("language", "en")
+        }
+    except Exception as e:
+        logger.error(f"Live transcription failed: {str(e)}")
+        return {"transcript": "", "error": str(e)}
