@@ -1,6 +1,6 @@
 const express = require('express');
 const multer = require('multer');
-const { authMiddleware } = require('../middleware/authMiddleware');
+const { verifyToken } = require('../middleware/authMiddleware');
 const replayService = require('../services/replayService');
 const storageService = require('../services/storageService');
 const response = require('../utils/apiResponse');
@@ -27,7 +27,7 @@ const upload = multer({
  * @desc    Get all replays for the authenticated user
  * @access  Private
  */
-router.get('/', authMiddleware, async (req, res) => {
+router.get('/', verifyToken, async (req, res) => {
   try {
     const replays = await replayService.getUserReplays(req.user.id, req);
     response.success(res, 'Replays fetched successfully', replays);
@@ -41,7 +41,7 @@ router.get('/', authMiddleware, async (req, res) => {
  * @desc    Get a specific replay by its interview ID
  * @access  Private
  */
-router.get('/:id', authMiddleware, async (req, res) => {
+router.get('/:id', verifyToken, async (req, res) => {
   try {
     const replay = await replayService.getReplayByInterviewId(req.params.id, req);
     if (!replay) {
@@ -63,7 +63,7 @@ router.get('/:id', authMiddleware, async (req, res) => {
  * @desc    Upload an interview replay video
  * @access  Private
  */
-router.post('/upload', authMiddleware, (req, res) => {
+router.post('/upload', verifyToken, (req, res) => {
   // Use multer middleware safely within the route to catch multer errors
   upload.single('video')(req, res, async (err) => {
     if (err) {
@@ -116,7 +116,7 @@ router.post('/upload', authMiddleware, (req, res) => {
  * @desc    Delete a replay
  * @access  Private
  */
-router.delete('/:id', authMiddleware, async (req, res) => {
+router.delete('/:id', verifyToken, async (req, res) => {
   try {
     await replayService.deleteReplay(req.params.id, req.user.id);
     response.success(res, 'Replay deleted successfully');
