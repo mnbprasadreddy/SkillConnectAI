@@ -49,8 +49,20 @@ const ProtectedRoute = ({ children }) => {
   const { user, loading, refreshUser } = useAuth();
   const [recovering, setRecovering] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [timedOut, setTimedOut] = useState(false);
   const MAX_RETRIES = 2;
   
+  // Hard failsafe: if loading persists > 12s (e.g. backend down), stop spinning
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      if (loading || recovering) {
+        console.warn('[ProtectedRoute] Loading timeout exceeded — forcing resolution.');
+        setTimedOut(true);
+      }
+    }, 12000);
+    return () => clearTimeout(timer);
+  }, []);
+
   React.useEffect(() => {
     if (!loading && user && !user.dbUser && !recovering && retryCount < MAX_RETRIES) {
       console.warn(`[ProtectedRoute] DB User missing, triggering recovery (attempt ${retryCount + 1}/${MAX_RETRIES})...`);
@@ -62,7 +74,7 @@ const ProtectedRoute = ({ children }) => {
     }
   }, [user, loading, user?.dbUser, refreshUser, recovering, retryCount]);
 
-  if (loading || recovering) return (
+  if ((loading || recovering) && !timedOut) return (
     <div className="h-screen w-screen bg-background flex items-center justify-center">
       <div className="flex flex-col items-center gap-4">
         <div className="w-16 h-16 border-4 border-primary/20 border-t-primary rounded-full animate-spin shadow-neon-cyan" />

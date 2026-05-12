@@ -28,9 +28,8 @@ export const AuthProvider = ({ children }) => {
     try {
       console.log('[AuthSync] ─── Sync Start ───');
       console.log('[AuthSync] Firebase User:', firebaseUser.email, '| UID:', firebaseUser.uid);
-      console.log('[AuthSync] Display Name:', firebaseUser.displayName);
 
-      // Force-refresh the token to get the latest claims (including displayName after updateProfile)
+      // Force-refresh the token
       const token = await getIdToken(firebaseUser, true);
       localStorage.setItem('skillconnect_token', token);
       console.log('[AuthSync] ✅ Token refreshed.');
@@ -40,37 +39,30 @@ export const AuthProvider = ({ children }) => {
         profile_image: firebaseUser.photoURL || null
       };
 
-      console.log('[AuthSync] POST /users/sync payload:', JSON.stringify(payload));
+      // ⏱ 10-second safety timeout — if backend is down/slow, don't freeze the UI
+      const syncPromise = api.post('/users/sync', payload);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Backend sync timeout after 10s')), 10000)
+      );
 
-      const response = await api.post('/users/sync', payload);
-      
-      console.log('[AuthSync] 🟢 Sync API Response:', JSON.stringify(response));
-
-      // api.js interceptor returns the JSON body directly.
-      // Server response shape: { success: true, data: userObject, message: '...' }
+      const response = await Promise.race([syncPromise, timeoutPromise]);
       const dbUser = response?.data;
       
       if (!dbUser) {
         console.error('[AuthSync] ❌ Sync succeeded but response.data is empty.');
-        console.log('[AuthSync] Full response keys:', Object.keys(response || {}));
       } else {
-        console.log('[AuthSync] ✅ DB User synced. ID:', dbUser.id, '| Email:', dbUser.email);
+        console.log('[AuthSync] ✅ DB User synced. ID:', dbUser.id, '| Role:', dbUser.role);
       }
 
-      const userData = {
-        ...firebaseUser,
-        dbUser: dbUser || null
-      };
-      
+      const userData = { ...firebaseUser, dbUser: dbUser || null };
       setUser(userData);
       setIsRecovering(false);
       console.log('[AuthSync] ─── Sync Complete ───');
       return userData;
     } catch (err) {
-      console.error('[AuthSync] ❌ Sync FAILED:', err.response?.status, err.response?.data || err.message);
-      console.error('[AuthSync] Full error:', err);
+      console.warn('[AuthSync] ⚠️ Sync failed or timed out — falling back to Firebase-only user:', err.message);
 
-      // Set user with Firebase-only data so app doesn't crash
+      // Gracefully continue with Firebase data so the UI never gets stuck
       const fallbackUser = { ...firebaseUser, dbUser: null };
       setUser(fallbackUser);
       setIsRecovering(false);
