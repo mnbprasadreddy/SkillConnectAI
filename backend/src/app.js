@@ -26,11 +26,7 @@ const aiCoachRoutes = require('./routes/aiCoachRoutes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { apiLimiter } = require('./middleware/rateLimiter');
 
-const app = express();
-
-// ─── Global Middleware ─────────────────────────────────────────
-app.use(helmet());
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
     console.log(`[CORS] Incoming origin: ${origin}`);
     const allowedOrigins = [
@@ -39,8 +35,8 @@ app.use(cors({
       'http://localhost:5175',
       'https://skill-connect-ai-gamma.vercel.app', // Production Vercel URL
     ];
-    
-    // Keep environment variables supported for future deployments
+
+    // Support additional origins from environment variable
     if (process.env.CLIENT_URL) {
       process.env.CLIENT_URL.split(',').forEach(url => {
         if (url.trim()) allowedOrigins.push(url.trim());
@@ -48,7 +44,7 @@ app.use(cors({
     }
 
     if (!origin || allowedOrigins.includes(origin)) {
-      console.log(`[CORS] Allowed origin: ${origin || 'NO_ORIGIN'}`);
+      console.log(`[CORS] Allowed origin: ${origin || 'NO_ORIGIN (server-to-server)'}`);
       callback(null, true);
     } else {
       console.warn(`[CORS] Blocked origin: ${origin}`);
@@ -56,9 +52,24 @@ app.use(cors({
     }
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
   credentials: true,
-}));
+  optionsSuccessStatus: 200, // Some legacy browsers choke on 204
+};
+
+const app = express();
+
+// ─── Global Middleware ─────────────────────────────────────────
+app.use(helmet());
+
+// Apply CORS to all routes
+app.use(cors(corsOptions));
+
+// ⚡ Explicitly handle OPTIONS preflight for ALL routes BEFORE auth middleware.
+// Without this, preflight requests from Vercel get rejected by auth middleware
+// before the CORS headers are attached, causing "no 'Access-Control-Allow-Origin'" errors.
+app.options('*', cors(corsOptions));
 app.use(compression());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));

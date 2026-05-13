@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useState } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 
 // Layouts
@@ -47,6 +47,7 @@ const LoadingFallback = () => (
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
   const { user, loading, refreshUser } = useAuth();
+  const location = useLocation();
   const [recovering, setRecovering] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [timedOut, setTimedOut] = useState(false);
@@ -83,7 +84,8 @@ const ProtectedRoute = ({ children }) => {
     </div>
   );
   
-  if (!user) return <Navigate to="/login" />;
+  // Redirect to login, preserving the attempted location so Login.jsx can redirect back
+  if (!user) return <Navigate to="/login" state={{ from: location }} replace />;
   
   return children;
 };

@@ -2,15 +2,32 @@ import axios from 'axios';
 import { getIdToken } from 'firebase/auth';
 import { auth } from './firebase';
 
-// Dynamically determine the default API URL based on the environment
+// ── API URL Resolution ───────────────────────────────────────────────────────
+// Priority order:
+// 1. VITE_API_URL from environment (set on Vercel dashboard for production)
+// 2. Localhost in dev mode
+// 3. Hard-coded Render backend as last-resort production fallback
 const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-const defaultApiUrl = isLocalhost ? 'http://localhost:5000/api' : `${window.location.origin}/api`;
+
+let resolvedApiUrl;
+if (import.meta.env.VITE_API_URL) {
+  resolvedApiUrl = import.meta.env.VITE_API_URL;
+  console.log('[API] Using VITE_API_URL:', resolvedApiUrl);
+} else if (isLocalhost) {
+  resolvedApiUrl = 'http://localhost:5000/api';
+  console.log('[API] Using localhost API URL');
+} else {
+  // Production fallback — Render backend
+  resolvedApiUrl = 'https://skillconnectai.onrender.com/api';
+  console.log('[API] Using Render production fallback URL');
+}
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || defaultApiUrl,
+  baseURL: resolvedApiUrl,
   headers: {
     'Content-Type': 'application/json',
   },
+  withCredentials: true,
 });
 
 // ── Request interceptor — always get a FRESH Firebase token ─────────────────

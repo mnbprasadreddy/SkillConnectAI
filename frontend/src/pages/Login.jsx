@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Mail, Lock, ArrowRight, Github, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -13,10 +13,13 @@ const Login = () => {
   
   const { login, user, isRecovering } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // If user was redirected from a protected route, send them back there after login
+  const from = location.state?.from?.pathname || '/app/dashboard';
 
   React.useEffect(() => {
-    if (user && user.dbUser) navigate('/app/dashboard');
-  }, [user, navigate]);
+    if (user && user.dbUser) navigate(from, { replace: true });
+  }, [user, navigate, from]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -24,7 +27,8 @@ const Login = () => {
       setError('');
       setLoading(true);
       await login(email, password);
-      navigate('/app/dashboard');
+      // Navigate to the intended destination (or dashboard as fallback)
+      navigate(from, { replace: true });
     } catch (err) {
       console.error('[Auth] Login Error:', err.code, err.message);
       setError(mapAuthError(err.code));

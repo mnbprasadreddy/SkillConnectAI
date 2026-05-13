@@ -9,7 +9,8 @@ import {
   Clock,
   CheckCircle2,
   TrendingUp,
-  AlertCircle
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
 import StatCard from '../components/StatCard';
 import { 
@@ -29,6 +30,38 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { formatDistanceToNow } from 'date-fns';
 
+// ── Generate AI Insights Button ────────────────────────────────────────────
+// Shown in the Neural Insights panel when no recommendations exist yet.
+const GenerateInsightsButton = ({ onGenerated }) => {
+  const [generating, setGenerating] = useState(false);
+
+  const handleGenerate = async () => {
+    try {
+      setGenerating(true);
+      const response = await api.post('/recommendations/generate');
+      // Fetch freshly-generated recommendations
+      const recsRes = await api.get('/recommendations');
+      const recs = Array.isArray(recsRes?.data) ? recsRes.data : [];
+      if (onGenerated) onGenerated(recs);
+    } catch (err) {
+      console.error('[Dashboard] Failed to generate recommendations:', err.message);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <button
+      onClick={handleGenerate}
+      disabled={generating}
+      className="flex items-center gap-2 px-4 py-2 bg-primary/10 border border-primary/30 text-primary text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-primary/20 transition-all disabled:opacity-50"
+    >
+      <RefreshCw className={`w-3 h-3 ${generating ? 'animate-spin' : ''}`} />
+      {generating ? 'Analyzing...' : 'Generate AI Insights'}
+    </button>
+  );
+};
+
 const Dashboard = () => {
   const { user } = useAuth();
   const [data, setData] = useState(null);
@@ -39,33 +72,51 @@ const Dashboard = () => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const [dashResponse, recsResponse, codingResponse] = await Promise.all([
+
+        // Fetch each endpoint independently so a failure in one doesn't block others
+        const [dashResponse, recsResponse, codingResponse] = await Promise.allSettled([
           api.get('/analytics/dashboard'),
           api.get('/recommendations'),
           api.get('/analytics/coding')
         ]);
-        
-        const dashboardData = dashResponse.data || {};
-        const codingData = codingResponse.data || {};
-        const recsData = Array.isArray(recsResponse.data) ? recsResponse.data : [];
 
-        console.log('[SafeDebug] Dashboard Hydrated:', dashboardData);
-        
-        // Merge coding stats into dashboard stats for the charts
-        if (codingData && dashboardData?.stats) {
-          dashboardData.stats.submissionTrend = codingData.submissionTrend;
-          
-          const diffBreakdown = {};
-          if (codingData.difficultyBreakdown) {
-            codingData.difficultyBreakdown.forEach(d => {
-              diffBreakdown[d.difficulty] = d.problemsSolved;
-            });
+        // Dashboard stats
+        if (dashResponse.status === 'fulfilled') {
+          const dashboardData = dashResponse.value?.data || {};
+          const codingData = codingResponse.status === 'fulfilled'
+            ? (codingResponse.value?.data || {})
+            : {};
+
+          console.log('[SafeDebug] Dashboard Hydrated:', dashboardData);
+
+          // Merge coding stats into dashboard stats for the charts
+          if (codingData && dashboardData?.stats) {
+            dashboardData.stats.submissionTrend = codingData.submissionTrend;
+
+            const diffBreakdown = {};
+            if (codingData.difficultyBreakdown) {
+              codingData.difficultyBreakdown.forEach(d => {
+                diffBreakdown[d.difficulty] = d.problemsSolved;
+              });
+            }
+            dashboardData.stats.problemsSolvedByDifficulty = diffBreakdown;
           }
-          dashboardData.stats.problemsSolvedByDifficulty = diffBreakdown;
+
+          setData(dashboardData);
+        } else {
+          console.error('[Dashboard] Failed to fetch dashboard data:', dashResponse.reason?.message);
         }
-        
-        setData(dashboardData);
-        setRecommendations(recsData);
+
+        // Recommendations — independent, non-blocking
+        if (recsResponse.status === 'fulfilled') {
+          const recsData = Array.isArray(recsResponse.value?.data)
+            ? recsResponse.value.data
+            : [];
+          setRecommendations(recsData);
+        } else {
+          console.warn('[Dashboard] Recommendations not available:', recsResponse.reason?.message);
+          setRecommendations([]);
+        }
       } catch (err) {
         console.error('Failed to fetch dashboard data', err);
       } finally {
@@ -228,28 +279,34 @@ const Dashboard = () => {
           </div>
           
           <div className="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
-            {recommendations.length > 0 ? recommendations.slice(0, 4).map((rec, i) => (
-              <motion.div 
-                key={rec.id} 
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: i * 0.1 }}
-                className="p-4 bg-white/5 rounded-2xl border border-white/5 hover:border-primary/20 transition-all cursor-pointer group"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[10px] uppercase tracking-wider font-black text-secondary/80">
-                    {rec.type.replace('_', ' ')}
-                  </span>
-                  <Clock className="w-3 h-3 text-muted" />
-                </div>
-                <p className="text-sm font-medium leading-relaxed group-hover:text-primary transition-colors">
-                  {rec.content.message}
-                </p>
-              </motion.div>
-            )) : (
+            {recommendations.length > 0 ? recommendations.slice(0, 4).map((rec, i) => {
+              let content = {};
+              try { content = typeof rec.content === 'string' ? JSON.parse(rec.content) : (rec.content || {}); }
+              catch { content = {}; }
+              return (
+                <motion.div 
+                  key={rec.id} 
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.1 }}
+                  className="p-4 bg-white/5 rounded-2xl border border-white/5 hover:border-primary/20 transition-all cursor-pointer group"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] uppercase tracking-wider font-black text-secondary/80">
+                      {(rec.type || rec.recommendationType || '').replace('_', ' ')}
+                    </span>
+                    <Clock className="w-3 h-3 text-muted" />
+                  </div>
+                  <p className="text-sm font-medium leading-relaxed group-hover:text-primary transition-colors">
+                    {content.message || rec.content}
+                  </p>
+                </motion.div>
+              );
+            }) : (
               <div className="flex flex-col items-center justify-center h-full text-center p-4 space-y-4">
                 <AlertCircle className="w-8 h-8 text-muted/30" />
-                <p className="text-xs text-muted italic">Generating intelligent progression path...</p>
+                <p className="text-xs text-muted italic">No AI insights yet. Generate your personalized pathway.</p>
+                <GenerateInsightsButton onGenerated={setRecommendations} />
               </div>
             )}
           </div>
