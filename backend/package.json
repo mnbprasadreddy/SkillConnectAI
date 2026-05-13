@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "kill-port 5000 && nodemon src/server.js",
+    "postinstall": "npx prisma generate",
     "prisma:generate": "npx prisma generate",
     "prisma:migrate": "npx prisma migrate dev",
     "prisma:push": "npx prisma db push",
@@ -45,6 +46,7 @@
   "devDependencies": {
     "jest": "^29.7.0",
     "kill-port": "^2.0.1",
+    "prisma": "^6.9.0",
     "supertest": "^7.0.0"
   }
 }
